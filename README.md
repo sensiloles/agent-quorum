@@ -48,6 +48,44 @@ Requires Node ≥ 24 and whichever provider CLIs your config selects (`codex`,
 runner is preflighted before the loop starts, so a missing login fails fast with
 a remedy hint instead of stalling mid-iteration.
 
+## Platform support
+
+| OS | Status | CI |
+| ----------- | ------ | ---|
+| macOS 13+ | Supported | `macos-latest` |
+| Linux (glibc) | Supported | `ubuntu-latest` |
+| Windows | Not supported | — |
+
+Both macOS and Linux are tested on every push and pull request via the full
+`pnpm run check` matrix (build · typecheck · lint · format · tests).
+
+**Provider CLIs on Linux.** The installer commands below apply to most glibc
+Linux distros (Ubuntu, Debian, Fedora, Arch). Install each CLI you plan to use:
+
+```sh
+npm install -g @anthropic-ai/claude-code   # claude
+npm install -g @openai/codex               # codex
+```
+
+`cursor-agent` does not have an official Linux package yet. Set
+`PLAN_LOOP_CURSOR_BIN` to the path of your Cursor headless binary if you need
+the `cursor` runner on Linux:
+
+```sh
+export PLAN_LOOP_CURSOR_BIN=/path/to/cursor-agent
+```
+
+After installation, authenticate each provider with its own auth command
+(`claude auth login`, `codex login`, etc.) — agent-quorum runs a preflight
+check before the loop starts and will report a remedy hint for any missing login.
+
+**Optional system dependency.** `plan-loop status` uses `lsof` to resolve the
+working directory of a running session when `--work` is not specified. On
+minimal Linux environments where `lsof` is absent the command falls back to the
+run registry, but workdir detection may be less reliable. Install `lsof` via
+your package manager (`apt install lsof`, `dnf install lsof`, etc.) to get the
+full experience.
+
 ## CLI
 
 A single `plan-loop` bin fronts four entry points:
