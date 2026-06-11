@@ -50,11 +50,11 @@ a remedy hint instead of stalling mid-iteration.
 
 ## Platform support
 
-| OS | Status | CI |
-| ----------- | ------ | ---|
-| macOS 13+ | Supported | `macos-latest` |
-| Linux (glibc) | Supported | `ubuntu-latest` |
-| Windows | Not supported | — |
+| OS            | Status        | CI              |
+| ------------- | ------------- | --------------- |
+| macOS 13+     | Supported     | `macos-latest`  |
+| Linux (glibc) | Supported     | `ubuntu-latest` |
+| Windows       | Not supported | —               |
 
 Both macOS and Linux are tested on every push and pull request via the full
 `pnpm run check` matrix (build · typecheck · lint · format · tests).
