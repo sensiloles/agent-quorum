@@ -1,33 +1,40 @@
 # agent-quorum
 
-Iterative **plan → critique → update** orchestrator that drives the Codex,
-Claude Code, and Cursor Agent CLIs to produce and refine implementation plans
-until they converge — with schema-validated artifacts, watchdogged provider
-calls, a reference validator, an optional fix pass, and an operator
-clarification gate over Telegram.
+[![npm version](https://img.shields.io/npm/v/agent-quorum.svg?logo=npm&label=npm)](https://www.npmjs.com/package/agent-quorum)
 
-This is a TypeScript implementation with the same flags, artifacts, exit codes,
-environment variables, and schemas as the original Bash orchestrator.
+Iterative **plan → critique → update** orchestrator. It drives the Codex,
+Claude Code, and Cursor Agent CLIs to turn a prompt or a rough plan into a
+converged implementation plan — every artifact schema-validated, every provider
+call watchdogged, and no role ever granted a write tool.
 
 ## How it works
 
 ```text
-prompt.md ──(clarify gate)──► creator ──► plan.v0.md
-                                              │
-                              ┌───────────────▼───────────────┐
-                              │  critic (JSON critique)       │
-                              │  creator (revised plan)       │◄─ operator
-                              │  …until convergence           │   interventions
-                              └───────────────┬───────────────┘
-                                              ▼
-              reference validator ──► fix pass ──► plan.final.md
-                                                   └─► plan.final.ru.md (translate pass)
+prompt.md
+    │
+    │  clarify gate · operator answers blocking questions (Telegram)
+    │
+    ▼
+creator ──► plan.v0.md
+                │
+    ╭───────────┴───────────╮
+    │  critic   → critique  │
+    │  creator  → revision  │ ◄── operator interventions
+    │  …until convergence   │
+    ╰───────────┬───────────╯
+                ▼
+reference validator ──► fix pass ──► plan.final.md
+                                           │
+                                           │  translate pass
+                                           │
+                                           ▼
+                                   plan.final.ru.md
 ```
 
-Five roles (critic, creator, fixer, reviewer, translator) map onto three
+Five roles — critic, creator, fixer, reviewer, translator — map onto three
 providers (`codex`, `claude`, `cursor-agent`) through a single declarative
 config. Every provider call runs in its own process group under a byte-idle /
-semantic-idle / wall-clock watchdog; no role is ever granted a write tool.
+semantic-idle / wall-clock watchdog.
 
 ## Install
 
@@ -36,14 +43,14 @@ npm install -g agent-quorum   # CLI
 npm install agent-quorum      # library
 ```
 
-Requires Node ≥ 24 and whichever provider CLIs your config selects
-(`codex`, `claude`, `cursor-agent`). No other binaries are needed — JSON,
-schema validation, and diffing are all in-process.
+Requires Node ≥ 24 and whichever provider CLIs your config selects (`codex`,
+`claude`, `cursor-agent`) — installed **and authenticated**. Each selected
+runner is preflighted before the loop starts, so a missing login fails fast with
+a remedy hint instead of stalling mid-iteration.
 
 ## CLI
 
-One `plan-loop` bin maps 1:1 onto the four reference entry points
-([details](docs/cli.md)):
+A single `plan-loop` bin fronts four entry points:
 
 ```sh
 plan-loop my-plan.md                      # core loop over an existing plan
@@ -53,35 +60,32 @@ plan-loop status [PID]                    # run snapshot (any PID in the tree)
 plan-loop intervene --work <dir> "note"   # inject operator guidance mid-run
 ```
 
-Flags for the core run: `--iters N`, `--effort {low,high,max}`,
-`--fix/--no-fix`, `--translate/--no-translate`, `--prompt <file>`.
-
-Exit codes: `0` clean / needs-review, `1` usage or preflight, `3` schema-invalid
-artifact, `4` empty or shape-broken creator output, `5` workspace-rule violation
-in the final plan, `6` final plan blocked, `7` clarification cancelled, `143`
-signal teardown.
+Core-run flags: `--iters N`, `--effort {low,high,max}`, `--fix/--no-fix`,
+`--translate/--no-translate`, `--prompt <file>`. Full flag reference and exit
+codes live in [`docs/cli.md`](docs/cli.md).
 
 ## Library
 
 ```ts
 import { runPlanLoop, getRunStatus, addIntervention, ExitCode } from 'agent-quorum';
 
-const { exitCode } = await runPlanLoop({ input: 'my-plan.md', iters: 3, effort: 'high' });
-if (exitCode === ExitCode.Ok) {
-  console.log('converged');
+const result = await runPlanLoop({ input: 'my-plan.md', iters: 3, effort: 'high' });
+if (result.exitCode === ExitCode.Ok) {
+  console.log(`converged in ${result.iterations} iterations: ${result.finalPlanPath}`);
 }
 ```
 
-The API returns results — only the CLI calls `process.exit`. See
-[`docs/api.md`](docs/api.md).
+The API returns results — only the CLI calls `process.exit`. `runPlanLoop`
+returns a structured result (`workDir`, `finalPlanPath`, `summaryPath`,
+`iterations`, `health`) built from the same data as `summary.md`. See
+[`docs/api.md`](docs/api.md) for the full surface, including CommonJS use.
 
 ## Configuration
 
 A single `plan-loop.json` (packaged default; override with
 `PLAN_LOOP_CONFIG_FILE`) declares loop settings and the per-role
-runner/model/reasoning/tool matrix, with `CLI > env > file` precedence for
-loop-tuning knobs and `env > file` for the role matrix. The full reference —
-including every `PLAN_LOOP_*` environment variable — lives in
+runner/model/reasoning/tool matrix. The full reference — every `PLAN_LOOP_*`
+variable and the override precedence — lives in
 [`docs/configuration.md`](docs/configuration.md).
 
 ## Documentation
@@ -89,9 +93,9 @@ including every `PLAN_LOOP_*` environment variable — lives in
 - [`docs/architecture.md`](docs/architecture.md) — roles, providers, loop
   mechanics, artifact contract, watchdog, sessions.
 - [`docs/configuration.md`](docs/configuration.md) — `plan-loop.json` and the
-  environment variable surface.
+  environment-variable surface.
 - [`docs/cli.md`](docs/cli.md) — entry points, flags, exit codes.
-- [`docs/api.md`](docs/api.md) — typed API.
+- [`docs/api.md`](docs/api.md) — typed API and CommonJS consumption.
 
 ## Development
 

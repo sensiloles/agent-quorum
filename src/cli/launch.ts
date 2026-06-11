@@ -7,6 +7,8 @@ import { spawn } from 'node:child_process';
 import { HaltError } from '../runtime/halt.js';
 import { packageRoot, projectRoot } from '../runtime/env.js';
 import { resolveResumeWorkdir } from '../core/resume.js';
+import { LAUNCH_USAGE } from './help.js';
+import type { RunOverrides } from '../types.js';
 
 // The detached runner entry resolves from this module's own location (not
 // process.argv) so the library API can launch too: dist runs node main.js,
@@ -32,9 +34,6 @@ function runnerCommand(): { command: string; baseArgs: string[] } {
   };
 }
 
-const USAGE =
-  'usage: launch.sh [--resume] [--iters N] [--effort {low,high,max}] [--prompt] [--no-fix] [--no-translate] <input.md>\n';
-
 function fail(message: string, code: number): never {
   process.stderr.write(`${message}\n`);
   throw new HaltError(message, code, true);
@@ -49,10 +48,18 @@ function rotationStamp(): string {
   );
 }
 
+export interface LaunchOutcome {
+  exitCode: number;
+  workDir?: string;
+  pid?: number;
+  logPath?: string;
+}
+
 export async function runLaunchCli(
   args: readonly string[],
   out: (text: string) => void = (text) => process.stdout.write(text),
-): Promise<number> {
+  overrides: RunOverrides = {},
+): Promise<LaunchOutcome> {
   let resume = false;
   const passArgs: string[] = [];
   let input = '';
@@ -102,8 +109,8 @@ export async function runLaunchCli(
         i += 1;
         break;
       case arg === '-h' || arg === '--help':
-        out(USAGE);
-        return 0;
+        out(LAUNCH_USAGE);
+        return { exitCode: 0 };
       case arg === '--':
         i += 1;
         break;
@@ -130,7 +137,7 @@ export async function runLaunchCli(
   const base = path.basename(absInput, path.extname(absInput));
   const plansDir = process.env.PLAN_LOOP_PLANS_DIR ?? path.join(os.homedir(), '.claude', 'plans');
 
-  let workOverride = process.env.PLAN_LOOP_WORK_DIR;
+  let workOverride = overrides.workDir ?? process.env.PLAN_LOOP_WORK_DIR;
   if (resume && (workOverride === undefined || workOverride === '')) {
     const resolved = resolveResumeWorkdir(plansDir, base, effortVal);
     if (resolved.kind === 'none') throw new HaltError('resume: no workdir', 3, true);
@@ -153,6 +160,7 @@ export async function runLaunchCli(
   const env: NodeJS.ProcessEnv = { ...process.env, CI: 'true' };
   if (resume) env.PLAN_LOOP_RESUME = '1';
   if (workOverride !== undefined && workOverride !== '') env.PLAN_LOOP_WORK_DIR = workOverride;
+  if (overrides.configFile !== undefined) env.PLAN_LOOP_CONFIG_FILE = overrides.configFile;
 
   const runner = runnerCommand();
   const logFd = openSync(logPath, 'w');
@@ -187,5 +195,5 @@ export async function runLaunchCli(
       `follow:  tail -F "${logPath}"\n` +
       `stop:    kill -TERM -${pid}\n`,
   );
-  return 0;
+  return { exitCode: 0, workDir: work, pid, logPath };
 }

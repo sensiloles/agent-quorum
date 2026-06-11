@@ -4,6 +4,7 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  realpathSync,
   rmSync,
   writeFileSync,
 } from 'node:fs';
@@ -25,6 +26,7 @@ import {
   writeCritique,
   writeDefaultPlanLoopConfig,
   writeFakeBin,
+  writePlanLoopConfig,
   writeStructuredPlanFile,
   withEnvAsync,
   type StderrCapture,
@@ -50,6 +52,32 @@ function baseEnv(
     FAKE_CODEX_PROMPT: path.join(tmp, 'codex.prompt'),
     ...extra,
   };
+}
+
+// A critic stand-in that outlives the launch verify delay (the reference
+// behaves the same way); the auth probe still answers instantly so preflight
+// does not eat its 3 s timeout.
+function writeHangingCodex(): void {
+  writeFileSync(
+    path.join(fake, 'codex'),
+    '#!/usr/bin/env bash\n' +
+      'if [[ "${1:-}" == "login" && "${2:-}" == "status" ]]; then exit 0; fi\n' +
+      'sleep 300 &\nwait\n',
+  );
+  chmodSync(path.join(fake, 'codex'), 0o755);
+}
+
+async function killDetachedRun(pid: number): Promise<void> {
+  try {
+    process.kill(-pid, 'SIGKILL');
+  } catch {
+    try {
+      process.kill(pid, 'SIGKILL');
+    } catch {
+      /* already gone */
+    }
+  }
+  await sleep(100);
 }
 
 beforeEach(() => {
@@ -89,7 +117,26 @@ describe('runPlanLoop (in-process)', () => {
     for (const artifact of ['plan.final.md', 'summary.md', 'run.meta.tsv', 'findings.json']) {
       expect(existsSync(path.join(work, artifact)), artifact).toBe(true);
     }
-    expect(readFileSync(path.join(work, 'summary.md'), 'utf8')).toContain('- FINAL: clean');
+    const summary = readFileSync(path.join(work, 'summary.md'), 'utf8');
+    expect(summary).toContain('- FINAL: clean');
+
+    const canonicalWork = realpathSync(work);
+    expect(result.workDir).toBe(canonicalWork);
+    expect(result.finalPlanPath).toBe(path.join(canonicalWork, 'plan.final.md'));
+    expect(result.summaryPath).toBe(path.join(canonicalWork, 'summary.md'));
+    expect(result.iterations).toBe(Number(/- iterations: ([0-9]+)/.exec(summary)?.[1]));
+    const healthLine =
+      /- final_health: critic=([0-9]+), addressed=([0-9]+), new=([0-9]+), invalid=([0-9]+), valid_addressed_pct=([0-9]+)/.exec(
+        summary,
+      );
+    expect(healthLine).not.toBeNull();
+    expect(result.health).toEqual({
+      critic: Number(healthLine?.[1]),
+      addressed: Number(healthLine?.[2]),
+      new: Number(healthLine?.[3]),
+      invalid: Number(healthLine?.[4]),
+      validAddressedPct: Number(healthLine?.[5]),
+    });
   });
 
   it('runs the fix pass and the translate pass when enabled', async () => {
@@ -235,10 +282,7 @@ describe('addIntervention (in-process)', () => {
 
 describe('launchPlanLoop (in-process)', () => {
   it('detaches a run and reports pid/log/work', async () => {
-    // The liveness check needs a run that outlives the verify delay (the
-    // reference behaves the same way), so the critic hangs.
-    writeFileSync(path.join(fake, 'codex'), '#!/usr/bin/env bash\nsleep 300 &\nwait\n');
-    chmodSync(path.join(fake, 'codex'), 0o755);
+    writeHangingCodex();
     const result = await withEnvAsync(
       baseEnv({
         PLAN_LOOP_LAUNCH_VERIFY_DELAY: '0.3',
@@ -258,6 +302,9 @@ describe('launchPlanLoop (in-process)', () => {
     const pid = Number(/pid:\s+([0-9]+)/.exec(result.output)?.[1]);
     expect(Number.isInteger(pid)).toBe(true);
     expect(existsSync(path.join(tmp, 'plans', 'loop-input', 'run.log'))).toBe(true);
+    expect(result.pid).toBe(pid);
+    expect(result.workDir).toBe(path.join(tmp, 'plans', 'loop-input'));
+    expect(result.logPath).toBe(path.join(tmp, 'plans', 'loop-input', 'run.log'));
 
     const statusEnv = {
       PLAN_LOOP_PLANS_DIR: path.join(tmp, 'plans'),
@@ -284,16 +331,7 @@ describe('launchPlanLoop (in-process)', () => {
     expect(listing.exitCode).toBe(0);
     expect(listing.output).toContain('found 1 plan-loop run(s)');
 
-    try {
-      process.kill(-pid, 'SIGKILL');
-    } catch {
-      try {
-        process.kill(pid, 'SIGKILL');
-      } catch {
-        /* already gone */
-      }
-    }
-    await sleep(100);
+    await killDetachedRun(pid);
   }, 30_000);
 
   it('runs a prompt-mode loop in-process (clarify disabled)', async () => {
@@ -330,4 +368,94 @@ describe('launchPlanLoop (in-process)', () => {
     expect(result.exitCode).toBe(2);
     expect(capture.text()).toContain('input not found:');
   });
+});
+
+describe('typed workDir/configFile options', () => {
+  it('runPlanLoop honors workDir/configFile without mutating process.env', async () => {
+    const optWork = path.join(tmp, 'opt-work');
+    mkdirSync(optWork);
+    const optConfig = path.join(tmp, 'opt-config.json');
+    writePlanLoopConfig(optConfig, 'critic:codex:custom-model-probe');
+
+    const result = await withEnvAsync(
+      baseEnv({
+        PLAN_LOOP_WORK_DIR: undefined,
+        PLAN_LOOP_CONFIG_FILE: undefined,
+        FAKE_CODEX_OUTPUT: path.join(tmp, 'empty.json'),
+      }),
+      async () => {
+        const envBefore = JSON.stringify(process.env);
+        const run = await runPlanLoop({
+          input: path.join(tmp, 'input.md'),
+          iters: 1,
+          effort: 'low',
+          fix: false,
+          translate: false,
+          workDir: optWork,
+          configFile: optConfig,
+        });
+        expect(JSON.stringify(process.env)).toBe(envBefore);
+        return run;
+      },
+    );
+
+    expect(result.exitCode).toBe(ExitCode.Ok);
+    for (const artifact of ['plan.final.md', 'summary.md', 'run.meta.tsv']) {
+      expect(existsSync(path.join(optWork, artifact)), artifact).toBe(true);
+    }
+    expect(readFileSync(path.join(optWork, 'run.meta.tsv'), 'utf8')).toContain(
+      'custom-model-probe',
+    );
+    expect(existsSync(path.join(tmp, 'plans', 'loop-input'))).toBe(false);
+  });
+
+  it('launchPlanLoop forwards workDir/configFile to the detached child', async () => {
+    writeHangingCodex();
+    const optWork = path.join(tmp, 'launch-work');
+    const optConfig = path.join(tmp, 'opt-config.json');
+    writePlanLoopConfig(optConfig, 'critic:codex:launch-model-probe');
+
+    const result = await withEnvAsync(
+      baseEnv({
+        PLAN_LOOP_LAUNCH_VERIFY_DELAY: '0.3',
+        PLAN_LOOP_WORK_DIR: undefined,
+        PLAN_LOOP_CONFIG_FILE: undefined,
+      }),
+      async () => {
+        const envBefore = JSON.stringify(process.env);
+        const run = await launchPlanLoop({
+          input: path.join(tmp, 'input.md'),
+          iters: 1,
+          effort: 'low',
+          fix: false,
+          translate: false,
+          workDir: optWork,
+          configFile: optConfig,
+        });
+        expect(JSON.stringify(process.env)).toBe(envBefore);
+        return run;
+      },
+    );
+
+    expect(result.exitCode).toBe(0);
+    expect(result.output).toContain(`work:  ${optWork}`);
+    expect(existsSync(path.join(optWork, 'run.log'))).toBe(true);
+    const pid = Number(/pid:\s+([0-9]+)/.exec(result.output)?.[1]);
+    expect(Number.isInteger(pid)).toBe(true);
+
+    try {
+      let meta = '';
+      for (let attempt = 0; attempt < 50; attempt += 1) {
+        const metaFile = path.join(optWork, 'run.meta.tsv');
+        if (existsSync(metaFile)) {
+          meta = readFileSync(metaFile, 'utf8');
+          if (meta.includes('launch-model-probe')) break;
+        }
+        await sleep(200);
+      }
+      expect(meta).toContain('launch-model-probe');
+    } finally {
+      await killDetachedRun(pid);
+    }
+  }, 30_000);
 });

@@ -11,6 +11,9 @@ if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
 HELP
   exit 0
 fi
+if [[ "${1:-}" == "status" ]]; then
+  exit "${FAKE_CURSOR_STATUS:-0}"
+fi
 is_json=0
 is_resume=0
 args=("$@")

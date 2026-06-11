@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { runCli, runCliAsync } from '../helpers/cli.js';
 import {
   emptyCritique,
+  REPO_ROOT,
   writeCritique,
   writeDefaultPlanLoopConfig,
   writeFakeBin,
@@ -74,7 +75,7 @@ describe('exit-code matrix (AC-3)', () => {
     const bogus = runCli(['--bogus', path.join(tmp, 'input.md')], baseEnv());
     expect(bogus.status).toBe(1);
     expect(bogus.stderr).toContain('unknown flag: --bogus');
-    expect(bogus.stderr).toContain('usage: plan-loop.sh');
+    expect(bogus.stderr).toContain('usage: plan-loop');
 
     const missing = runCli([path.join(tmp, 'no-such.md')], baseEnv());
     expect(missing.status).toBe(1);
@@ -210,7 +211,7 @@ describe('entry-point dispatch (F12 / AC-1)', () => {
 
     const help = runCli(['launch', '--help'], baseEnv());
     expect(help.status).toBe(0);
-    expect(help.stdout).toContain('usage: launch.sh');
+    expect(help.stdout).toContain('usage: plan-loop launch');
   });
 
   it('status rejects an unknown PID with exit 2', () => {
@@ -225,5 +226,71 @@ describe('entry-point dispatch (F12 / AC-1)', () => {
       baseEnv({ FAKE_CODEX_OUTPUT: path.join(tmp, 'empty.json') }),
     );
     expect(result.status).toBe(0);
+  });
+});
+
+describe('runner auth preflight', () => {
+  it('halts with exit 1 before any provider call when a probe reports unauthenticated', () => {
+    const result = runCli(
+      ['--effort', 'low', '--iters', '1', path.join(tmp, 'input.md'), '--no-fix', '--no-translate'],
+      baseEnv({
+        FAKE_CODEX_OUTPUT: path.join(tmp, 'empty.json'),
+        FAKE_CODEX_LOGIN_STATUS: '1',
+      }),
+    );
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('codex is installed but not authenticated');
+    expect(result.stderr).toContain('codex login');
+    expect(existsSync(path.join(tmp, 'codex.prompt'))).toBe(false);
+  });
+
+  it('warns and continues when a probe outcome is unknown', () => {
+    const result = runCli(
+      ['--effort', 'low', '--iters', '1', path.join(tmp, 'input.md'), '--no-fix', '--no-translate'],
+      baseEnv({
+        FAKE_CODEX_OUTPUT: path.join(tmp, 'empty.json'),
+        FAKE_CODEX_LOGIN_STATUS: '3',
+      }),
+    );
+    expect(result.status).toBe(0);
+    expect(result.stderr).toContain('could not verify codex authentication');
+  });
+});
+
+describe('--help / --version', () => {
+  it('explicit --help exits 0 with stdout usage and no *.sh names anywhere', () => {
+    for (const args of [
+      ['--help'],
+      ['-h'],
+      ['launch', '--help'],
+      ['status', '--help'],
+      ['intervene', '--help'],
+    ]) {
+      const result = runCli(args, baseEnv());
+      expect(result.status, args.join(' ')).toBe(0);
+      expect(result.stdout, args.join(' ')).toContain('plan-loop');
+      expect(result.stdout, args.join(' ')).not.toContain('.sh');
+    }
+    const core = runCli(['--help'], baseEnv());
+    expect(core.stdout).toContain('usage: plan-loop');
+    expect(core.stdout).toContain('defaults: iters=4 effort=high fix=on translate=off');
+  });
+
+  it('--help inside core-run args prints the run usage to stdout and exits 0', () => {
+    const result = runCli(['--iters', '1', path.join(tmp, 'input.md'), '--help'], baseEnv());
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain('usage: plan-loop');
+    expect(result.stdout).not.toContain('.sh');
+  });
+
+  it('--version prints the package version', () => {
+    const pkg = JSON.parse(readFileSync(path.join(REPO_ROOT, 'package.json'), 'utf8')) as {
+      version: string;
+    };
+    for (const flag of ['--version', '-V']) {
+      const result = runCli([flag], baseEnv());
+      expect(result.status, flag).toBe(0);
+      expect(result.stdout, flag).toBe(`${pkg.version}\n`);
+    }
   });
 });

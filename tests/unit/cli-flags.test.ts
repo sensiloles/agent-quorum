@@ -1,7 +1,7 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { parseRunArgs } from '../../src/cli/run.js';
 import { runInterveneCli } from '../../src/cli/intervene.js';
 import { runLaunchCli } from '../../src/cli/launch.js';
@@ -52,7 +52,9 @@ describe('core run flag parsing', () => {
     expect(capture.text()).toContain('--iters expects a positive integer');
     expect(haltCode(() => parseRunArgs(['--iters=x', input]))).toBe(1);
     expect(haltCode(() => parseRunArgs(['--effort']))).toBe(1);
-    expect(haltCode(() => parseRunArgs(['-h']))).toBe(1);
+    const stdoutSpy = vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
+    expect(haltCode(() => parseRunArgs(['-h']))).toBe(0);
+    stdoutSpy.mockRestore();
     expect(haltCode(() => parseRunArgs(['--prompt']))).toBe(1);
     expect(haltCode(() => parseRunArgs([input, 'extra.md']))).toBe(1);
     expect(capture.text()).toContain('unexpected arg: extra.md');
@@ -69,7 +71,7 @@ describe('intervene flag parsing', () => {
         /* drop */
       }),
     ).toBe(0);
-    expect(haltCode(() => runInterveneCli(['--work', work, '-h'], () => undefined))).toBe(1);
+    expect(haltCode(() => runInterveneCli(['--work', work, '-h'], () => undefined))).toBe(0);
     expect(haltCode(() => runInterveneCli(['--work', work], () => undefined))).toBe(1);
     expect(haltCode(() => runInterveneCli(['--target', 'critic', 'x'], () => undefined))).toBe(1);
     expect(haltCode(() => runInterveneCli(['--work', ''], () => undefined))).toBe(1);
@@ -88,6 +90,6 @@ describe('launch flag parsing', () => {
       }
     }
     expect(codes).toEqual([2, 2, 2, 2]);
-    expect(await runLaunchCli(['--help'], () => undefined)).toBe(0);
+    expect((await runLaunchCli(['--help'], () => undefined)).exitCode).toBe(0);
   });
 });

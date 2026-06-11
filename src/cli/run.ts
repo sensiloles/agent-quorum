@@ -8,7 +8,6 @@ import {
   statSync,
   writeFileSync,
 } from 'node:fs';
-import { accessSync, constants } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { loadPlanLoopDotenv, packageRoot, projectRoot } from '../runtime/env.js';
@@ -39,20 +38,18 @@ import { runFixPass } from '../core/fix-pass.js';
 import { markOperatorInterventionsMigrated } from '../core/interventions.js';
 import { resolveWatchdogKnobs } from '../core/knobs.js';
 import { runIterationLoop } from '../core/loop.js';
+import { preflightRunners } from '../core/preflight.js';
 import { planDocumentShapeHealth, planHasTitleHeading } from '../core/plan-shape.js';
 import { prepareResume } from '../core/resume.js';
 import { skillPaths, type RunContext } from '../core/run-context.js';
-import { writeSummary } from '../core/summary.js';
+import { buildRunReport, writeSummary, type RunReport } from '../core/summary.js';
 import { runTranslatePass } from '../core/translate-pass.js';
 import { readFindingsCounts, validateFinalPlan } from '../core/validate-plan.js';
-import type { RunMode } from '../types.js';
-
-const USAGE =
-  'usage: plan-loop.sh [--iters N] [--effort {low,high,max}] [--no-fix] [--no-translate] <plan.md>\n' +
-  '       plan-loop.sh [--iters N] [--effort {low,high,max}] [--no-fix] [--no-translate] --prompt <prompt.md>\n';
+import { RUN_USAGE } from './help.js';
+import type { RunMode, RunOverrides } from '../types.js';
 
 function usage(): never {
-  process.stderr.write(USAGE);
+  process.stderr.write(RUN_USAGE);
   throw new HaltError('usage', 1, true);
 }
 
@@ -125,8 +122,8 @@ export function parseRunArgs(args: readonly string[]): ParsedRunArgs {
         i += 1;
         break;
       case arg === '-h' || arg === '--help':
-        usage();
-        break;
+        process.stdout.write(RUN_USAGE);
+        throw new HaltError('help', 0, true);
       case arg === '--':
         break parse;
       case arg.startsWith('-'):
@@ -152,20 +149,6 @@ export function parseRunArgs(args: readonly string[]): ParsedRunArgs {
   return { mode, inputPath, cli };
 }
 
-function commandExists(name: string): boolean {
-  for (const dir of (process.env.PATH ?? '').split(':')) {
-    if (dir === '') continue;
-    const candidate = path.join(dir, name);
-    try {
-      accessSync(candidate, constants.X_OK);
-      if (statSync(candidate).isFile()) return true;
-    } catch {
-      /* keep scanning */
-    }
-  }
-  return false;
-}
-
 function canonicalDir(dir: string): string {
   try {
     return realpathSync(dir);
@@ -183,18 +166,28 @@ function filesEqual(a: string, b: string): boolean {
   return readFileSync(a).equals(readFileSync(b));
 }
 
-export async function runPlanLoopCli(args: readonly string[]): Promise<number> {
+export interface RunOutcome {
+  exitCode: number;
+  report?: RunReport;
+}
+
+export async function runPlanLoopCli(
+  args: readonly string[],
+  overrides: RunOverrides = {},
+): Promise<RunOutcome> {
   loadPlanLoopDotenv();
   const parsed = parseRunArgs(args);
 
-  const settings = resolveRunSettings(parsed.cli, configFilePath());
+  const configFile = overrides.configFile ?? configFilePath();
+  const settings = resolveRunSettings(parsed.cli, configFile);
   const knobs = resolveWatchdogKnobs();
   const effort = effortMatrix(settings.effort);
 
   const plansDir = process.env.PLAN_LOOP_PLANS_DIR ?? path.join(os.homedir(), '.claude', 'plans');
   const inputPath = absolutePath(parsed.inputPath);
   const base = path.basename(inputPath, '.md');
-  let work = process.env.PLAN_LOOP_WORK_DIR ?? path.join(plansDir, `loop-${base}`);
+  let work =
+    overrides.workDir ?? process.env.PLAN_LOOP_WORK_DIR ?? path.join(plansDir, `loop-${base}`);
   if (!path.isAbsolute(work)) work = path.join(process.cwd(), work);
   mkdirSync(work, { recursive: true });
   work = canonicalDir(work);
@@ -205,8 +198,8 @@ export async function runPlanLoopCli(args: readonly string[]): Promise<number> {
   const runMetaFile = path.join(work, 'run.meta.tsv');
   const runRegistryFile = path.join(runStateDir, `${process.pid}.tsv`);
 
-  const matrix = resolveRoleConfig(configFilePath());
-  const permissions = resolveRolePermissions(configFilePath());
+  const matrix = resolveRoleConfig(configFile);
+  const permissions = resolveRolePermissions(configFile);
 
   const metadata: RunMetadata = {
     pid: process.pid,
@@ -274,28 +267,17 @@ export async function runPlanLoopCli(args: readonly string[]): Promise<number> {
     if (!existsSync(skillFile)) {
       process.stderr.write(`missing: ${skillFile}\n`);
       cleanupRunRegistry(runRegistryFile);
-      return 1;
+      return { exitCode: 1, report: { workDir: work } };
     }
   }
 
   const cursorBin = process.env.PLAN_LOOP_CURSOR_BIN ?? 'cursor-agent';
   const required = runnersInUse(matrix, settings.fixPass, settings.translatePass);
-  for (const runner of required) {
-    if (runner === 'codex' && !commandExists('codex')) {
-      process.stderr.write('codex is required\n');
-      cleanupRunRegistry(runRegistryFile);
-      return 1;
-    }
-    if (runner === 'claude' && !commandExists('claude')) {
-      process.stderr.write('claude is required\n');
-      cleanupRunRegistry(runRegistryFile);
-      return 1;
-    }
-    if (runner === 'cursor' && !commandExists(cursorBin)) {
-      process.stderr.write('cursor-agent is required\n');
-      cleanupRunRegistry(runRegistryFile);
-      return 1;
-    }
+  const preflightFailure = preflightRunners(required, cursorBin);
+  if (preflightFailure !== undefined) {
+    process.stderr.write(`${preflightFailure.message}\n`);
+    cleanupRunRegistry(runRegistryFile);
+    return { exitCode: 1, report: { workDir: work } };
   }
 
   const scratch = Scratch.create(base);
@@ -349,7 +331,7 @@ export async function runPlanLoopCli(args: readonly string[]): Promise<number> {
       const v0 = path.join(work, 'plan.v0.md');
       if (!existsSync(v0) || statSync(v0).size === 0) {
         const gateOk = await runClarificationGate(ctx, inputPath);
-        if (!gateOk) return 7;
+        if (!gateOk) return { exitCode: 7, report: { workDir: work } };
         log(`creating plan v0 from prompt (${matrix.creator.runner} ${matrix.creator.model})`);
         await runCreatorCreate(ctx, inputPath, v0);
         markOperatorInterventionsMigrated(work, 'creator', 'plan.v0.md');
@@ -416,8 +398,9 @@ export async function runPlanLoopCli(args: readonly string[]): Promise<number> {
     });
 
     log(`done. summary: ${path.join(work, 'summary.md')}`);
-    if (finalStatus === 'blocked') return 6;
-    return 0;
+    const report = buildRunReport(ctx, iter);
+    if (finalStatus === 'blocked') return { exitCode: 6, report };
+    return { exitCode: 0, report };
   } finally {
     cleanup();
   }

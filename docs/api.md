@@ -10,6 +10,8 @@ import {
   type RunPlanLoopOptions,
   type LaunchPlanLoopOptions,
   type RunResult,
+  type RunHealth,
+  type LaunchResult,
   type CommandResult,
   type InterventionTarget,
   type Role,
@@ -22,33 +24,82 @@ The API is a thin, semver-deliberate surface over the same engine the CLI
 uses. Functions return results; only the CLI calls `process.exit`. Operational
 logging still goes to stderr.
 
+## Importing from CommonJS
+
+The package ships a single ESM build, but Node ≥ 24 (already required by
+`engines`) loads a synchronous ESM graph through `require()` natively, so a
+CommonJS consumer works without a dual build:
+
+```js
+const { runPlanLoop, ExitCode } = require('agent-quorum');
+```
+
+For TypeScript consumers this resolution needs TS ≥ 5.8 with
+`"module": "nodenext"`. On older toolchains, fall back to a dynamic import:
+
+```js
+const { runPlanLoop } = await import('agent-quorum');
+```
+
+`require.resolve('agent-quorum/package.json')` is also supported.
+
 ## runPlanLoop(options)
 
 Runs the core loop to completion in-process.
 
 ```ts
-const { exitCode } = await runPlanLoop({
+const result = await runPlanLoop({
   input: 'my-plan.md', // plan file, or prompt file with prompt: true
   prompt: false,
   iters: 3,
   effort: 'high', // 'low' | 'high' | 'max'
   fix: true,
   translate: false,
+  workDir: '/abs/path/loop-my-plan', // optional; takes precedence over PLAN_LOOP_WORK_DIR
+  configFile: '/abs/path/plan-loop.json', // optional; takes precedence over PLAN_LOOP_CONFIG_FILE
 });
+// result: {
+//   exitCode: 0,
+//   workDir: '/abs/path/loop-my-plan',
+//   finalPlanPath: '/abs/path/loop-my-plan/plan.final.md',
+//   summaryPath: '/abs/path/loop-my-plan/summary.md',
+//   iterations: 2,
+//   health: { critic: 3, addressed: 2, new: 1, invalid: 0, validAddressedPct: 66 },
+// }
 ```
 
 `exitCode` follows the CLI contract (`ExitCode.Ok`, `ExitCode.SchemaInvalid`,
-`ExitCode.Blocked`, …). Artifacts land in the resolved workdir
-(`PLAN_LOOP_WORK_DIR` or `<plans>/loop-<base>`).
+`ExitCode.Blocked`, …). The structured fields are built from the same data
+that renders `summary.md`: `health` carries exactly the numbers of the
+`final_health` line, `iterations`/`finalPlanPath`/`summaryPath` mirror their
+summary lines; path fields are present only when the file exists, and failure
+exits may carry `workDir` alone. Artifacts land in the resolved workdir; for
+both `workDir` and `configFile` the precedence is option > environment
+variable > default (`<plans>/loop-<base>` / the packaged `plan-loop.json`).
+The options are typed alternatives to mutating `process.env` — the
+`workDir`/`configFile` plumbing itself never writes to the calling process
+environment. (The package-root `.env` loader keeps its reference semantics
+and still fills missing keys; see
+[configuration.md](configuration.md).)
 
 ## launchPlanLoop(options)
 
 Detaches a run into its own process group with `run.log` redirection.
 
 ```ts
-const { exitCode, output } = await launchPlanLoop({ input: 'task.md', resume: false });
+const { exitCode, output, workDir, pid, logPath } = await launchPlanLoop({
+  input: 'task.md',
+  resume: false,
+});
 // output: "started: task\n  pid:   …\n  log:   …\n  work:  …"
 ```
+
+`workDir`/`pid`/`logPath` are the structured counterparts of the `output`
+text. A detached launch cannot report `iterations`/`health` at detach time by
+construction — once the run finishes, read the artifacts in `workDir`
+(`summary.md`, `plan.final.md`). `workDir`/`configFile` options are forwarded
+to the detached child through its environment copy; the parent `process.env`
+is left untouched.
 
 ## getRunStatus(query?)
 

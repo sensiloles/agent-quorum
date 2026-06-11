@@ -1,0 +1,64 @@
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import {
+  globalHelp,
+  INTERVENE_USAGE,
+  LAUNCH_USAGE,
+  packageVersion,
+  RUN_USAGE,
+  STATUS_USAGE,
+} from '../../src/cli/help.js';
+import { REPO_ROOT, withEnv } from '../helpers/harness.js';
+
+let tmp: string;
+
+beforeEach(() => {
+  tmp = mkdtempSync(path.join(os.tmpdir(), 'plan-loop-helptest.'));
+});
+
+afterEach(() => {
+  rmSync(tmp, { recursive: true, force: true });
+});
+
+describe('help text', () => {
+  it('usage strings name the plan-loop bin and never the reference scripts', () => {
+    for (const usage of [RUN_USAGE, LAUNCH_USAGE, INTERVENE_USAGE, STATUS_USAGE]) {
+      expect(usage).toContain('plan-loop');
+      expect(usage).not.toContain('.sh');
+    }
+  });
+
+  it('packageVersion reads the packaged package.json', () => {
+    const pkg = JSON.parse(readFileSync(path.join(REPO_ROOT, 'package.json'), 'utf8')) as {
+      version: string;
+    };
+    expect(packageVersion()).toBe(pkg.version);
+  });
+
+  it('globalHelp embeds defaults from a readable config', () => {
+    const config = path.join(tmp, 'plan-loop.json');
+    writeFileSync(
+      config,
+      JSON.stringify({ settings: { iters: 9, effort: 'max', fix: false, translate: true } }),
+    );
+    const help = withEnv({ PLAN_LOOP_CONFIG_FILE: config }, () => globalHelp());
+    expect(help).toContain('usage: plan-loop');
+    expect(help).toContain('defaults: iters=9 effort=max fix=off translate=on');
+    expect(help).toContain(`(from ${config})`);
+  });
+
+  it('globalHelp omits the defaults line for unreadable or shape-broken configs', () => {
+    const broken = path.join(tmp, 'broken.json');
+    writeFileSync(broken, '{not json');
+    const withoutDefaults = withEnv({ PLAN_LOOP_CONFIG_FILE: broken }, () => globalHelp());
+    expect(withoutDefaults).not.toContain('defaults:');
+    expect(withoutDefaults).toContain('usage: plan-loop');
+
+    const noSettings = path.join(tmp, 'no-settings.json');
+    writeFileSync(noSettings, '{}');
+    const stillNoDefaults = withEnv({ PLAN_LOOP_CONFIG_FILE: noSettings }, () => globalHelp());
+    expect(stillNoDefaults).not.toContain('defaults:');
+  });
+});

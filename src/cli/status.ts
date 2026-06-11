@@ -3,10 +3,12 @@ import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { HaltError } from '../runtime/halt.js';
+import { colorsEnabled } from '../runtime/log.js';
 import { packageRoot } from '../runtime/env.js';
 import { fileLineCount, nonEmptyFile } from '../runtime/files.js';
 import { critiqueHealth } from '../core/metrics.js';
 import { isJsonObject, type JsonObject, type JsonValue } from '../core/json.js';
+import { STATUS_USAGE } from './help.js';
 
 function ps(args: string[]): string {
   try {
@@ -246,7 +248,7 @@ interface Palette {
 }
 
 function palette(): Palette {
-  if (process.stdout.isTTY) {
+  if (colorsEnabled(process.stdout)) {
     return {
       B: '\x1b[1m',
       R: '\x1b[0m',
@@ -574,13 +576,6 @@ function collectPlanLoopRoots(): number[] {
   }
   return roots;
 }
-
-const STATUS_USAGE =
-  'status.sh — show progress of a plan-loop run.\n' +
-  '\n' +
-  'Usage:\n' +
-  '  status.sh <PID>     — any PID in the run’s process tree (main or child)\n' +
-  '  status.sh           — list all currently running plan-loop runs\n';
 
 export function runStatusCli(
   args: readonly string[],

@@ -1,9 +1,14 @@
 import { isJsonObject, jqAlt, type JsonValue } from '../core/json.js';
+import { colorsEnabled } from '../runtime/log.js';
 
-const YELLOW = '\x1b[33m';
-const RED = '\x1b[31m';
-const DIM = '\x1b[2m';
-const RESET = '\x1b[0m';
+// Escape codes are applied at render time (never cached at import) so
+// TTY/NO_COLOR state changes after module load still gate the output.
+function paint(code: string, text: string): string {
+  return colorsEnabled() ? `${code}${text}\x1b[0m` : text;
+}
+const yellow = (text: string): string => paint('\x1b[33m', text);
+const red = (text: string): string => paint('\x1b[31m', text);
+const dim = (text: string): string => paint('\x1b[2m', text);
 
 function jqToString(value: JsonValue | undefined): string {
   if (value === undefined || value === null) return String(value);
@@ -61,11 +66,9 @@ export function streamJsonEvent(line: string): string[] {
     for (const item of content) {
       if (!isJsonObject(item)) continue;
       if (item.type === 'tool_use') {
-        out.push(
-          `    ${YELLOW}${jqToString(item.name)}${RESET} ${jqToString(item.input).slice(0, 120)}`,
-        );
+        out.push(`    ${yellow(jqToString(item.name))} ${jqToString(item.input).slice(0, 120)}`);
       } else if (item.type === 'text') {
-        out.push(`    ${DIM}${firstLine(item.text)}${RESET}`);
+        out.push(`    ${dim(firstLine(item.text))}`);
       }
     }
     return out;
@@ -73,7 +76,7 @@ export function streamJsonEvent(line: string): string[] {
 
   const item = isJsonObject(event.item) ? event.item : undefined;
   if (event.type === 'item.started' && item?.type === 'command_execution') {
-    out.push(`    ${YELLOW}exec${RESET} ${shortCommand(jqAlt(item.command, ''))}`);
+    out.push(`    ${yellow('exec')} ${shortCommand(jqAlt(item.command, ''))}`);
     return out;
   }
   if (
@@ -82,7 +85,7 @@ export function streamJsonEvent(line: string): string[] {
     jqAlt(item.exit_code, 0) !== 0
   ) {
     out.push(
-      `    ${RED}exec failed(${jqToString(jqAlt(item.exit_code, 0))})${RESET} ${shortCommand(jqAlt(item.command, ''))}`,
+      `    ${red(`exec failed(${jqToString(jqAlt(item.exit_code, 0))})`)} ${shortCommand(jqAlt(item.command, ''))}`,
     );
     return out;
   }
@@ -93,12 +96,12 @@ export function streamJsonEvent(line: string): string[] {
     itemContent !== null
   ) {
     const text = firstLine(contentText(itemContent));
-    if (text !== '') out.push(`    ${DIM}${text}${RESET}`);
+    if (text !== '') out.push(`    ${dim(text)}`);
     return out;
   }
   if (event.type === 'agent_message' && event.message !== undefined && event.message !== null) {
     const text = firstLine(event.message);
-    if (text !== '') out.push(`    ${DIM}${text}${RESET}`);
+    if (text !== '') out.push(`    ${dim(text)}`);
     return out;
   }
 
@@ -133,7 +136,7 @@ function streamPlainExec(text: string): string {
   if (lc !== -1) cmd = cmd.slice(lc + '-lc "'.length);
   const tail = cmd.indexOf('" in ');
   if (tail !== -1) cmd = cmd.slice(0, tail);
-  return `    ${YELLOW}exec${RESET} ${cmd.slice(0, 120)}`;
+  return `    ${yellow('exec')} ${cmd.slice(0, 120)}`;
 }
 
 // Stateful line filter shared by the codex and claude stream renderers.
@@ -155,7 +158,7 @@ export class StreamLogFilter {
     }
     if (this.wantsTokens) {
       this.wantsTokens = false;
-      return [`    ${DIM}tokens: ${line}${RESET}`];
+      return [`    ${dim(`tokens: ${line}`)}`];
     }
     if (line === 'exec') {
       this.isExec = true;
@@ -196,7 +199,7 @@ export function cursorStreamJsonEvent(line: string): string[] {
     for (const item of content) {
       if (!isJsonObject(item) || item.type !== 'text') continue;
       const text = firstLine(item.text);
-      if (text !== '') out.push(`    ${DIM}${text}${RESET}`);
+      if (text !== '') out.push(`    ${dim(text)}`);
     }
     return out;
   }
@@ -210,16 +213,16 @@ export function cursorStreamJsonEvent(line: string): string[] {
     const fn = toolCall && isJsonObject(toolCall.function) ? toolCall.function : undefined;
     if (read) {
       const args = isJsonObject(read.args) ? read.args : {};
-      out.push(`    ${YELLOW}Read${RESET} ${firstLine(jqAlt(args.path, ''))}`);
+      out.push(`    ${yellow('Read')} ${firstLine(jqAlt(args.path, ''))}`);
     } else if (write) {
       const args = isJsonObject(write.args) ? write.args : {};
-      out.push(`    ${YELLOW}Write${RESET} ${firstLine(jqAlt(args.path, ''))}`);
+      out.push(`    ${yellow('Write')} ${firstLine(jqAlt(args.path, ''))}`);
     } else if (fn) {
       out.push(
-        `    ${YELLOW}${jqToString(jqAlt(fn.name, 'tool'))}${RESET} ${firstLine(jqAlt(fn.arguments, ''))}`,
+        `    ${yellow(jqToString(jqAlt(fn.name, 'tool')))} ${firstLine(jqAlt(fn.arguments, ''))}`,
       );
     } else {
-      out.push(`    ${YELLOW}tool_call${RESET}`);
+      out.push(`    ${yellow('tool_call')}`);
     }
     return out;
   }
@@ -230,7 +233,7 @@ export function cursorStreamJsonEvent(line: string): string[] {
     const success = result?.success;
     if (success !== undefined && success !== null && success !== false) {
       const args = write && isJsonObject(write.args) ? write.args : {};
-      out.push(`    ${RED}write completed${RESET} ${firstLine(jqAlt(args.path, ''))}`);
+      out.push(`    ${red('write completed')} ${firstLine(jqAlt(args.path, ''))}`);
     }
     return out;
   }

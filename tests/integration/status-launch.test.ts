@@ -38,6 +38,7 @@ function writeSlowCodex(): void {
   writeFileSync(
     path.join(fake, 'codex'),
     '#!/usr/bin/env bash\n' +
+      'if [[ "${1:-}" == "login" && "${2:-}" == "status" ]]; then exit 0; fi\n' +
       'if [[ -n "${SLOW_CODEX_PID_FILE:-}" ]]; then echo $$ > "$SLOW_CODEX_PID_FILE.$$"; fi\n' +
       'sleep 300 &\n' +
       'if [[ -n "${SLOW_CODEX_PID_FILE:-}" ]]; then echo $! > "$SLOW_CODEX_PID_FILE.$$.child"; fi\n' +
@@ -129,6 +130,10 @@ describe('launch + status (Finding F4, AC-5)', () => {
     const runA = await launchHangingRun('alpha');
     expect(existsSync(runA.log)).toBe(true);
     expect(runA.work).toBe(path.join(tmp, 'plans', 'loop-alpha'));
+
+    const logContent = readFileSync(runA.log, 'utf8');
+    expect(logContent).toContain('[plan-loop]');
+    expect(logContent).not.toContain('\x1b[');
 
     const statusEnv = {
       PLAN_LOOP_PLANS_DIR: path.join(tmp, 'plans'),

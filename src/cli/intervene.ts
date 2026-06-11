@@ -3,13 +3,10 @@ import { randomUUID } from 'node:crypto';
 import path from 'node:path';
 import { HaltError } from '../runtime/halt.js';
 import { nowUtcStamp } from '../core/artifacts.js';
-
-const USAGE =
-  'usage: intervene.sh --work <workdir> [--target all|critic|creator|fixer|reviewer] <message...>\n' +
-  '       intervene.sh --work <workdir> [--target all|critic|creator|fixer|reviewer] --stdin\n';
+import { INTERVENE_USAGE } from './help.js';
 
 function usage(): never {
-  process.stderr.write(USAGE);
+  process.stderr.write(INTERVENE_USAGE);
   throw new HaltError('usage', 1, true);
 }
 
@@ -51,8 +48,8 @@ export function runInterveneCli(
         i += 1;
         break;
       case arg === '-h' || arg === '--help':
-        usage();
-        break;
+        out(INTERVENE_USAGE);
+        return 0;
       case arg === '--':
         i += 1;
         while (i < args.length) {

@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { HaltError } from '../runtime/halt.js';
+import { globalHelp, packageVersion } from './help.js';
 import { runInterveneCli } from './intervene.js';
 import { runLaunchCli } from './launch.js';
 import { runPlanLoopCli } from './run.js';
@@ -13,15 +14,23 @@ process.title = 'plan-loop';
 async function main(): Promise<number> {
   const args = process.argv.slice(2);
   const first = args[0];
+  if (first === '--version' || first === '-V') {
+    process.stdout.write(`${packageVersion()}\n`);
+    return 0;
+  }
+  if (first === '--help' || first === '-h') {
+    process.stdout.write(globalHelp());
+    return 0;
+  }
   switch (first) {
     case 'launch':
-      return runLaunchCli(args.slice(1));
+      return (await runLaunchCli(args.slice(1))).exitCode;
     case 'status':
       return runStatusCli(args.slice(1));
     case 'intervene':
       return runInterveneCli(args.slice(1));
     default:
-      return runPlanLoopCli(args);
+      return (await runPlanLoopCli(args)).exitCode;
   }
 }
 

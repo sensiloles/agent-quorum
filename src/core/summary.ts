@@ -1,7 +1,7 @@
 import { existsSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { isJsonObject, type JsonObject, type JsonValue } from './json.js';
-import { critiqueHealth } from './metrics.js';
+import { critiqueHealth, type CritiqueHealth } from './metrics.js';
 import { operatorInterventionsState } from './interventions.js';
 import { planDocumentShapeHealth } from './plan-shape.js';
 import type { RunContext } from './run-context.js';
@@ -42,6 +42,35 @@ export interface SummaryInput {
   finalReason: string;
 }
 
+// Shared by writeSummary and buildRunReport so the structured result can
+// never drift from the `final_health` line in summary.md.
+function finalHealth(ctx: RunContext): CritiqueHealth | undefined {
+  const lastCritique = path.join(ctx.work, `critique.v${ctx.lastCritiqueIter}.json`);
+  if (ctx.lastCritiqueIter < 0 || !existsSync(lastCritique)) return undefined;
+  return critiqueHealth(ctx.work, ctx.skills.criticSchema, ctx.lastCritiqueIter, lastCritique);
+}
+
+export interface RunReport {
+  workDir: string;
+  iterations?: number;
+  finalPlanPath?: string;
+  summaryPath?: string;
+  health?: CritiqueHealth;
+}
+
+export function buildRunReport(ctx: RunContext, iter: number): RunReport {
+  const finalPlan = path.join(ctx.work, 'plan.final.md');
+  const summaryFile = path.join(ctx.work, 'summary.md');
+  const health = finalHealth(ctx);
+  return {
+    workDir: ctx.work,
+    iterations: iter,
+    ...(existsSync(finalPlan) ? { finalPlanPath: finalPlan } : {}),
+    ...(existsSync(summaryFile) ? { summaryPath: summaryFile } : {}),
+    ...(health !== undefined ? { health } : {}),
+  };
+}
+
 export function writeSummary(ctx: RunContext, input: SummaryInput): void {
   const lines: string[] = [];
   const rejectedLog = path.join(ctx.work, 'rejected-log.jsonl');
@@ -62,14 +91,8 @@ export function writeSummary(ctx: RunContext, input: SummaryInput): void {
   if (ctx.resume.archiveDir !== '') {
     lines.push(`- stale_archive: \`${ctx.resume.archiveDir}\``);
   }
-  const lastCritique = path.join(ctx.work, `critique.v${ctx.lastCritiqueIter}.json`);
-  if (ctx.lastCritiqueIter >= 0 && existsSync(lastCritique)) {
-    const health = critiqueHealth(
-      ctx.work,
-      ctx.skills.criticSchema,
-      ctx.lastCritiqueIter,
-      lastCritique,
-    );
+  const health = finalHealth(ctx);
+  if (health !== undefined) {
     lines.push(
       `- final_health: critic=${health.total}, addressed=${health.addressed}, new=${health.newIssues}, invalid=${health.invalid}, valid_addressed_pct=${health.pct}`,
     );

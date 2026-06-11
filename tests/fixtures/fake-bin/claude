@@ -2,6 +2,9 @@
 json_encode() {
   node -e 'let d="";process.stdin.on("data",c=>{d+=c}).on("end",()=>{process.stdout.write(JSON.stringify(d))})'
 }
+if [[ "${1:-}" == "auth" && "${2:-}" == "status" ]]; then
+  exit "${FAKE_CLAUDE_AUTH_STATUS:-0}"
+fi
 is_json=0
 is_resume=0
 args=("$@")

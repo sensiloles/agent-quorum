@@ -59,6 +59,10 @@ secrets.
 | `PLAN_LOOP_STATE_DIR`   | run registry dir (default `<plans>/.runs`)       |
 | `PLAN_LOOP_RESUME`      | `1` resumes from the last stable plan            |
 
+The library API additionally accepts `workDir`/`configFile` as typed options
+on `runPlanLoop`/`launchPlanLoop`; resolution precedence is option > env >
+default. The CLI contract stays env-first ([details](api.md)).
+
 ### Loop settings (env layer)
 
 `PLAN_LOOP_MAX_ITERS`, `PLAN_LOOP_DIFF_THRESHOLD`, `PLAN_LOOP_RETRY_COUNT`,

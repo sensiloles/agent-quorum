@@ -1,13 +1,23 @@
 # CLI
 
 One `plan-loop` bin maps 1:1 onto the four reference scripts. This dispatch is
-the single deliberate surface adaptation from the reference (an npm package
-cannot ship four script names): a first argument of exactly `launch`, `status`,
-or `intervene` routes to that entry point; anything else — including any file
+a deliberate surface adaptation from the reference (an npm package cannot ship
+four script names): a first argument of exactly `launch`, `status`, or
+`intervene` routes to that entry point; anything else — including any file
 path — is the core run. A literal bare `launch`/`status`/`intervene` filename
 is shadowed; `./launch` or `launch.md` is not. Within each entry point the
-flags, positionals, unknown-flag rejection, and exit codes are identical to the
-reference scripts.
+flags, positionals, unknown-flag rejection, and exit codes are identical to
+the reference scripts, with one further documented deviation: an explicit
+`-h`/`--help` prints usage to **stdout** and exits **0** in every entry point
+(the reference run/intervene scripts replied on stderr with exit 1).
+Error-path usage output keeps the reference streams and exit codes.
+`plan-loop --help` with no other arguments prints the global help
+(subcommands, core-run flags, and the effective defaults from the resolved
+`plan-loop.json`); `plan-loop --version`/`-V` prints the package version.
+
+ANSI color is emitted only when the target stream is a TTY and `NO_COLOR` is
+unset or empty ([no-color.org](https://no-color.org) semantics) — redirected
+output and `run.log` stay escape-free; the log text itself is unchanged.
 
 ## Core run — `plan-loop [flags] <plan.md>`
 
@@ -19,6 +29,14 @@ plan-loop [--iters N] [--effort {low,high,max}] [--no-fix] [--no-translate] --pr
 Flags accept both `--flag value` and `--flag=value` forms for `--iters` /
 `--max-iters` and `--effort`. Unknown flags print `unknown flag:` plus usage
 and exit 1. One positional input only.
+
+Before the loop starts, every runner the effective config selects is
+preflighted: installation on `PATH`, then an authentication probe
+(`codex login status` / `claude auth status` / `<cursor-bin> status`) with a
+3 s timeout per probe — worst case ~9 s before the first provider call when
+all three runners are active. An unauthenticated runner exits 1 with a remedy
+hint before the first provider call; an indeterminate probe (missing
+subcommand, timeout) only warns and never blocks the run.
 
 Exit codes:
 
@@ -55,8 +73,9 @@ hints. With no arguments, lists every currently running plan-loop run
 
 Exits 2 for an unknown PID, 3 for a live PID outside any plan-loop tree.
 
-POSIX `ps` is the port's one deliberate external-binary exception, used only
-here; tree and elapsed rendering degrade gracefully without it.
+POSIX `ps` and `lsof` are the port's deliberate external-binary exceptions
+(`lsof` only resolves a run's workdir from its open `run.log` handle); tree,
+elapsed, and workdir rendering degrade gracefully without them.
 
 ## `plan-loop intervene`
 

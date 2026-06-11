@@ -1,4 +1,9 @@
 #!/usr/bin/env bash
+# Auth-probe stub: must exit before any argv logging or prompt capture so
+# preflight probes never pollute provider-call fixtures.
+if [[ "${1:-}" == "login" && "${2:-}" == "status" ]]; then
+  exit "${FAKE_CODEX_LOGIN_STATUS:-0}"
+fi
 if [[ -n "${FAKE_CODEX_ARGS_LOG:-}" ]]; then
   printf '%s\n' "$*" >> "$FAKE_CODEX_ARGS_LOG"
 fi
