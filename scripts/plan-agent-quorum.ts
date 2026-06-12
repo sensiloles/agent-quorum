@@ -5,8 +5,6 @@ import process from 'node:process';
 import { fileURLToPath } from 'node:url';
 import type { Effort, RunPlanLoopOptions, RunResult } from 'agent-quorum';
 
-type AgentQuorumApi = typeof import('agent-quorum');
-
 interface ParsedArgs {
   help: boolean;
   input?: string;
@@ -38,7 +36,6 @@ const DEFAULT_EFFORT: Effort = 'high';
 const DEFAULT_ITERS = 3;
 const DEFAULT_LOCALE = 'en';
 const MAX_WORKDIR_SLUG_LENGTH = 48;
-const PACKAGE_NAME = 'agent-quorum';
 const SLUG_EDGE_DASHES_PATTERN = /^-+|-+$/g;
 const SLUG_UNSAFE_CHARS_PATTERN = /[^a-z0-9]+/g;
 const TIMESTAMP_UNSAFE_CHARS_PATTERN = /[:.]/g;
@@ -245,7 +242,7 @@ async function main(): Promise<number> {
     }
 
     ensureBuilt();
-    const { runPlanLoop } = (await import(PACKAGE_NAME)) as AgentQuorumApi;
+    const { runPlanLoop } = await import('agent-quorum');
     const result = await runPlanLoop(options);
     printResult(result);
     return result.exitCode;
