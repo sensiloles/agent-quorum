@@ -1,75 +1,24 @@
 import { spawnSync } from 'node:child_process';
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
+import { setTimeout as sleep } from 'node:timers/promises';
 import { HaltError } from '../runtime/halt.js';
 import { colorsEnabled } from '../runtime/log.js';
 import { packageRoot } from '../runtime/env.js';
 import { fileLineCount, nonEmptyFile } from '../runtime/files.js';
+import { resolveArtifactRoots } from '../runtime/paths.js';
+import { commandOf, ppidOf, ps, psField } from '../runtime/proc.js';
 import { critiqueHealth } from '../core/metrics.js';
+import { resolveRunState, type RunRecord } from '../core/run-store.js';
 import { isJsonObject, type JsonObject, type JsonValue } from '../core/json.js';
+import { listCandidates, pickInteractive, renderListing } from './picker.js';
+import { systemProbes } from './probes.js';
+import { parseSelector, resolveSelector, isRunRecord } from './select.js';
 import { STATUS_USAGE } from './help.js';
-
-function ps(args: string[]): string {
-  try {
-    const result = spawnSync('ps', args, { encoding: 'utf8' });
-    if (result.status !== 0) {
-      return '';
-    }
-    return result.stdout;
-  } catch {
-    return '';
-  }
-}
-
-function psField(pid: number, field: string): string {
-  return ps(['-p', String(pid), '-o', `${field}=`]).trim();
-}
-
-function ppidOf(pid: number): number | undefined {
-  if (process.platform === 'linux') {
-    try {
-      const stat = readFileSync(`/proc/${pid}/stat`, 'utf8');
-      const afterComm = stat.slice(stat.lastIndexOf(')') + 2);
-      const ppid = Number(afterComm.split(' ')[1]);
-      return Number.isInteger(ppid) ? ppid : undefined;
-    } catch {
-      return undefined;
-    }
-  }
-  const out = psField(pid, 'ppid');
-  if (!/^[0-9]+$/.test(out)) {
-    return undefined;
-  }
-  return Number(out);
-}
-
-function commandOf(pid: number): string {
-  return ps(['-p', String(pid), '-o', 'command=']).replace(/\n$/, '');
-}
-
-function isAlive(pid: number): boolean {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch {
-    return false;
-  }
-}
 
 function baseToken(token: string): string {
   const stripped = token.endsWith('/') ? token.slice(0, -1) : token;
   return stripped.split('/').pop() ?? '';
-}
-
-function statusStateDirCandidates(): string[] {
-  if (process.env.PLAN_LOOP_STATE_DIR) {
-    return [process.env.PLAN_LOOP_STATE_DIR];
-  }
-  if (process.env.PLAN_LOOP_PLANS_DIR) {
-    return [path.join(process.env.PLAN_LOOP_PLANS_DIR, '.runs')];
-  }
-  return [path.join(os.homedir(), '.claude', 'plans', '.runs')];
 }
 
 function readMetaValue(file: string, key: string): string | undefined {
@@ -86,25 +35,6 @@ function readMetaValue(file: string, key: string): string | undefined {
     }
   }
   return undefined;
-}
-
-function registryPids(dirs: readonly string[]): Set<number> {
-  const pids = new Set<number>();
-  for (const dir of dirs) {
-    if (!existsSync(dir)) {
-      continue;
-    }
-    for (const name of readdirSync(dir)) {
-      if (!name.endsWith('.tsv')) {
-        continue;
-      }
-      const pid = readMetaValue(path.join(dir, name), 'pid');
-      if (pid !== undefined && /^[0-9]+$/.test(pid)) {
-        pids.add(Number(pid));
-      }
-    }
-  }
-  return pids;
 }
 
 // Command-shape root check: the port's runner sets process.title =
@@ -195,7 +125,7 @@ function stateDirCandidates(root: number): string[] {
   if (envPlans !== undefined && envPlans !== '') {
     dirs.push(path.join(envPlans, '.runs'));
   }
-  dirs.push(path.join(os.homedir(), '.claude', 'plans', '.runs'));
+  dirs.push(resolveArtifactRoots().stateDir);
   return [...new Set(dirs)];
 }
 
@@ -295,7 +225,7 @@ function resolveWorkDir(root: number, input: string): string | undefined {
       return canonicalDir(work);
     }
   }
-  const plansDir = process.env.PLAN_LOOP_PLANS_DIR ?? path.join(os.homedir(), '.claude', 'plans');
+  const plansDir = resolveArtifactRoots().runsDir;
   const work = defaultWorkDirFromInput(input, plansDir);
   if (work === undefined) {
     return undefined;
@@ -654,65 +584,27 @@ function printStatus(root: number, pal: Palette, write: (s: string) => void): vo
   }
 }
 
-function collectPlanLoopRoots(): number[] {
-  const registry = registryPids(statusStateDirCandidates());
-  const roots: number[] = [];
-  const identities = new Set<string>();
-  const consider = (pid: number) => {
-    if (!isAlive(pid)) {
-      return;
-    }
-    if (!commandIsPlanLoopRoot(pid)) {
-      return;
-    }
-    const pgid = psField(pid, 'pgid');
-    const identity = pgid !== '' ? `pgid:${pgid}` : `pid:${pid}`;
-    if (identities.has(identity)) {
-      return;
-    }
-    identities.add(identity);
-    roots.push(pid);
-  };
-  for (const pid of registry) {
-    consider(pid);
-  }
-  if ((process.env.PLAN_LOOP_STATUS_SCAN_PS ?? '1') !== '0') {
-    const out = ps(['-axo', 'pid=,ppid=']);
-    for (const line of out.split('\n')) {
-      const parts = line.trim().split(/\s+/);
-      if (parts.length < 2) {
-        continue;
-      }
-      if (Number(parts[1]) === 1) {
-        consider(Number(parts[0]));
-      }
-    }
-  }
-  return roots;
-}
-
+// Non-interactive status entry (library + non-TTY CLI). The no-arg case renders
+// the scriptable listing and never blocks. Interactive picking lives in
+// runStatusCliInteractive so the synchronous getRunStatus contract is preserved.
 export function runStatusCli(
   args: readonly string[],
   out: (text: string) => void = (text) => process.stdout.write(text),
 ): number {
   const pal = palette();
-  const write = out;
 
   if (args.length === 0) {
-    const roots = collectPlanLoopRoots();
-    if (roots.length === 0) {
+    const candidates = listCandidates();
+    if (candidates.length === 0) {
       process.stderr.write('no plan-loop runs currently active\n');
       return 0;
     }
-    write(`${pal.DIM}found ${roots.length} plan-loop run(s)${pal.R}\n`);
-    for (const root of roots) {
-      printStatus(root, pal, write);
-    }
+    out(renderListing(candidates, { color: colorsEnabled(process.stdout) }));
     return 0;
   }
 
   if (args[0] === '-h' || args[0] === '--help') {
-    write(STATUS_USAGE);
+    out(STATUS_USAGE);
     return 0;
   }
 
@@ -728,6 +620,79 @@ export function runStatusCli(
     throw new HaltError('not a plan-loop pid', 3, true);
   }
 
-  printStatus(root, pal, write);
+  printStatus(root, pal, out);
+  return 0;
+}
+
+const WATCH_INTERVAL_MS = 2000;
+
+function watchTarget(token: string | undefined): RunRecord | undefined {
+  if (token === undefined) {
+    return listCandidates().find((candidate) => candidate.isLive)?.record;
+  }
+  const selector = parseSelector(token);
+  if (selector === undefined) {
+    return undefined;
+  }
+  const resolved = resolveSelector(selector, { stateDir: resolveArtifactRoots().stateDir });
+  return resolved !== undefined && isRunRecord(resolved) ? resolved : undefined;
+}
+
+// `status --watch [selector]`: re-render printStatus until the run reaches a
+// terminal state (TTY). A non-TTY context emits exactly one snapshot (NFR-2).
+async function runStatusWatch(
+  args: readonly string[],
+  out: (text: string) => void,
+): Promise<number> {
+  const pal = palette();
+  const record = watchTarget(args.find((arg) => !arg.startsWith('-')));
+  if (record === undefined) {
+    process.stderr.write('no run to watch\n');
+    throw new HaltError('no run to watch', 2, true);
+  }
+  if (!process.stdout.isTTY) {
+    printStatus(record.pid, pal, out);
+    return 0;
+  }
+  for (;;) {
+    printStatus(record.pid, pal, out);
+    if (resolveRunState(record, systemProbes) !== 'running') {
+      return 0;
+    }
+    await sleep(WATCH_INTERVAL_MS);
+  }
+}
+
+// CLI entry that adds the interactive picker for a no-arg invocation in a TTY:
+// list candidates, let the operator pick (a sole candidate auto-selects), then
+// show the picked run's status. Every other case delegates to the synchronous
+// entry, so non-TTY and selector/pid invocations are unchanged.
+export async function runStatusCliInteractive(
+  args: readonly string[],
+  out: (text: string) => void = (text) => process.stdout.write(text),
+): Promise<number> {
+  if (args.includes('--watch')) {
+    return runStatusWatch(
+      args.filter((arg) => arg !== '--watch'),
+      out,
+    );
+  }
+  const isInteractive = process.stdin.isTTY && process.stdout.isTTY;
+  if (args.length !== 0 || !isInteractive) {
+    return runStatusCli(args, out);
+  }
+  const candidates = listCandidates();
+  if (candidates.length === 0) {
+    process.stderr.write('no plan-loop runs currently active\n');
+    return 0;
+  }
+  const picked = await pickInteractive(candidates, {
+    input: process.stdin,
+    output: process.stdout,
+  });
+  if (picked === undefined) {
+    return 0;
+  }
+  printStatus(picked.record.pid, palette(), out);
   return 0;
 }

@@ -99,6 +99,14 @@ and `stale.<timestamp>/` archives on resume (which now also archive `plan.split.
 `package-findings.json`, and `plan.package/`). A registry copy of
 `run.meta.tsv` lives in `<state-dir>/<pid>.tsv` while the run is alive.
 
+Every run is also addressable through a durable ledger: each run mints a
+sortable, non-digit-leading `runId` and a disambiguated `name`, uses a
+run-keyed workdir (`<home>/runs/loop-<name>`), guarantees a followable
+`run.log`, and writes `<home>/state/runs/<runId>.json` at start (state
+`running` with the real workdir/log paths and pid/pgid/start-token) finalized
+to a terminal state at exit. Discovery and the `id`/`name`/`--last`/`pid`
+selectors resolve against this ledger; `pid` only ever resolves a live run.
+
 ## Watchdog and process hygiene
 
 Claude and cursor calls stream NDJSON through an in-process watchdog with three

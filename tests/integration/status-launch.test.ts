@@ -14,6 +14,7 @@ import path from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { runCli } from '../helpers/cli.js';
+import { pgidOf } from '../../src/runtime/proc.js';
 import {
   writeDefaultPlanLoopConfig,
   writeFakeBin,
@@ -164,9 +165,38 @@ describe('launch + status (Finding F4, AC-5)', () => {
     const listAll = runCli(['status'], statusEnv);
     expect(listAll.status).toBe(0);
     expect(listAll.stdout).toContain('found 2 plan-loop run(s)');
-    expect(listAll.stdout).toContain('━━ alpha ━━');
-    expect(listAll.stdout).toContain('━━ beta ━━');
+    expect(listAll.stdout).toContain('alpha  [running]');
+    expect(listAll.stdout).toContain('beta  [running]');
     expect(listAll.stdout).not.toContain('loop-decoy');
+
+    // A stale `running` record whose pid is alive (this worker) with a matching
+    // pgid but a different start token must be rejected, not listed as live.
+    writeFileSync(
+      path.join(tmp, 'state', 'runs', 'rdecoy00000-token.json'),
+      `${JSON.stringify({
+        runId: 'rdecoy00000-token',
+        name: 'tokendecoy',
+        pid: process.pid,
+        pgid: pgidOf(process.pid) ?? '0',
+        procStartToken: 'STALE-START-TOKEN',
+        mode: 'plan',
+        inputPath: path.join(tmp, 'decoy.md'),
+        workDir: path.join(tmp, 'plans', 'loop-tokendecoy'),
+        logPath: path.join(tmp, 'plans', 'loop-tokendecoy', 'run.log'),
+        plansDir: path.join(tmp, 'plans'),
+        startedAt: '2026-01-01T00:00:00Z',
+        effort: 'low',
+        state: 'running',
+      })}\n`,
+    );
+    const afterDecoy = runCli(['status'], statusEnv);
+    expect(afterDecoy.status).toBe(0);
+    // The decoy is listed, but its start-token mismatch demotes it to a
+    // terminal state — it is never shown as a live/running run.
+    expect(afterDecoy.stdout).toContain('alpha  [running]');
+    expect(afterDecoy.stdout).toContain('beta  [running]');
+    expect(afterDecoy.stdout).toContain('tokendecoy  [failed]');
+    expect(afterDecoy.stdout).not.toMatch(/tokendecoy {2}\[running\]/);
 
     process.kill(runA.pid, 'SIGTERM');
     await sleep(1500);

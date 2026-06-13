@@ -216,22 +216,22 @@ Rules:
 
 ## Running agent-quorum
 
-The self-planning harness dogfoods the public package API:
+Dogfood the loop through the `plan-loop` bin, run straight from source:
 
 ```sh
-pnpm run build
-pnpm exec tsx scripts/plan-agent-quorum.ts --prompt .agents/prompts/<slug>.md
+pnpm run plan:self -- --prompt .agents/prompts/<slug>.md
 ```
 
 Useful options:
 
 ```sh
-pnpm exec tsx scripts/plan-agent-quorum.ts --dry-run --prompt .agents/prompts/<slug>.md
-pnpm exec tsx scripts/plan-agent-quorum.ts --work .agents/plans/loop-<slug>-high --effort high --iters 7 --prompt .agents/prompts/<slug>.md
+pnpm run plan:self -- --effort high --iters 7 --prompt .agents/prompts/<slug>.md
+PLAN_LOOP_WORK_DIR=.agents/plans/loop-<slug>-high pnpm run plan:self -- --effort high --iters 7 --prompt .agents/prompts/<slug>.md
 ```
 
-The harness imports `agent-quorum`, not `src/index.ts`, so it behaves like an
-external TypeScript consumer of the built package. Run `pnpm run build` first.
+`plan:self` runs `src/cli/main.ts` via `tsx` — no build step — and writes run
+artifacts and the ledger under `.agents/plans/`. For the public API path that
+external consumers use, see [`examples/api.ts`](../../examples/api.ts).
 
 ## Verification
 

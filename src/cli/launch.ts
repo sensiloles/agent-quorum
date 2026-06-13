@@ -1,12 +1,18 @@
 import { existsSync, mkdirSync, openSync, renameSync, statSync, closeSync } from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { spawn } from 'node:child_process';
 import { HaltError } from '../runtime/halt.js';
 import { packageRoot, projectRoot } from '../runtime/env.js';
+import { resolveArtifactRoots } from '../runtime/paths.js';
 import { resolveResumeWorkdir } from '../core/resume.js';
+import {
+  deriveRunName,
+  generateRunId,
+  readRunRecords,
+  runNameFromWorkdir,
+} from '../core/run-store.js';
 import { LAUNCH_USAGE } from './help.js';
 import type { RunOverrides } from '../types.js';
 
@@ -55,6 +61,8 @@ function rotationStamp(): string {
 
 export interface LaunchOutcome {
   exitCode: number;
+  runId?: string;
+  name?: string;
   workDir?: string;
   pid?: number;
   logPath?: string;
@@ -166,7 +174,8 @@ export async function runLaunchCli(
 
   const absInput = path.resolve(input);
   const base = path.basename(absInput, path.extname(absInput));
-  const plansDir = process.env.PLAN_LOOP_PLANS_DIR ?? path.join(os.homedir(), '.claude', 'plans');
+  const { home, runsDir, stateDir } = resolveArtifactRoots(overrides);
+  const plansDir = runsDir;
 
   let workOverride = overrides.workDir ?? process.env.PLAN_LOOP_WORK_DIR;
   if (resume && (workOverride === undefined || workOverride === '')) {
@@ -181,10 +190,18 @@ export async function runLaunchCli(
     process.stderr.write(`resume: attaching to ${resolved.dir}\n`);
   }
 
-  const work =
-    workOverride !== undefined && workOverride !== ''
-      ? workOverride
-      : path.join(plansDir, `loop-${base}`);
+  let work: string;
+  let name: string;
+  let mintedRunId: string | undefined;
+  if (workOverride !== undefined && workOverride !== '') {
+    work = workOverride;
+    name = runNameFromWorkdir(workOverride);
+    mintedRunId = undefined;
+  } else {
+    name = deriveRunName(readRunRecords(stateDir), base);
+    mintedRunId = generateRunId();
+    work = path.join(plansDir, `loop-${name}`);
+  }
   mkdirSync(work, { recursive: true });
   const logPath = path.join(work, 'run.log');
 
@@ -196,11 +213,15 @@ export async function runLaunchCli(
   if (resume) {
     env.PLAN_LOOP_RESUME = '1';
   }
-  if (workOverride !== undefined && workOverride !== '') {
-    env.PLAN_LOOP_WORK_DIR = workOverride;
-  }
+  env.PLAN_LOOP_WORK_DIR = work;
   if (overrides.configFile !== undefined) {
     env.PLAN_LOOP_CONFIG_FILE = overrides.configFile;
+  }
+  env.PLAN_LOOP_HOME = home;
+  env.PLAN_LOOP_STDIO_IS_RUNLOG = '1';
+  if (mintedRunId !== undefined) {
+    env.PLAN_LOOP_RUN_ID = mintedRunId;
+    env.PLAN_LOOP_RUN_NAME = name;
   }
 
   const runner = runnerCommand();
@@ -228,7 +249,8 @@ export async function runLaunchCli(
   }
 
   out(
-    `started: ${base}\n` +
+    `started: ${name}\n` +
+      (mintedRunId !== undefined ? `  run:   ${mintedRunId}\n` : '') +
       `  pid:   ${pid}\n` +
       `  log:   ${logPath}\n` +
       `  work:  ${work}\n` +
@@ -236,5 +258,11 @@ export async function runLaunchCli(
       `follow:  tail -F "${logPath}"\n` +
       `stop:    kill -TERM -${pid}\n`,
   );
-  return { exitCode: 0, workDir: work, pid, logPath };
+  return {
+    exitCode: 0,
+    workDir: work,
+    pid,
+    logPath,
+    ...(mintedRunId !== undefined ? { runId: mintedRunId, name } : {}),
+  };
 }

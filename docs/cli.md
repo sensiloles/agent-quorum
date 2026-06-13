@@ -98,14 +98,39 @@ Backgrounds the run in its own process group, rotates `run.log`, exports
 prints pid/log/work plus follow/stop hints. Usage errors exit 2; resume workdir
 resolution exits 3 (none found) or 4 (ambiguous).
 
+## Selector grammar
+
+`show`, `logs`, and `intervene` (and `status --watch`) resolve a run through one
+selector grammar against the durable ledger:
+
+- a bare all-digits token is a **pid** (any process in the run's tree); it only
+  ever resolves a **live** run — a finished run's pid is gone;
+- a `runId` (or unambiguous prefix; always non-digit-leading) resolves that run;
+- any other token is a **name**, resolving the most-recent run with that name;
+- `--last` resolves the most-recent run overall; `--work <dir>` addresses an
+  explicit workdir without consulting the ledger.
+
+Each run reports its `runId` at start (the `run <id> (<name>)` log line, the
+`launch` `run:` block, and `RunResult`/`LaunchResult`), so an older same-named
+run stays reachable by `id`/`--last`.
+
 ## `plan-loop status [PID]`
 
 With a PID — **any** process in the run's tree, including provider children —
-walks the parent chain to the root run, resolves its workdir registry-first,
-and prints the process tree, artifact counts, an iteration table computed from
-the `$WORK` artifacts, interventions, the last log event, and follow/stop
-hints. With no arguments, lists every currently running plan-loop run
-(registry first, plus a `ps` scan that `PLAN_LOOP_STATUS_SCAN_PS=0` disables).
+walks the parent chain to the root run, resolves its workdir, and prints the
+process tree, artifact counts, an iteration table computed from the `$WORK`
+artifacts, interventions, the last log event, and follow/stop hints.
+
+With no arguments in a TTY, it lists live-first then recent-finished runs and
+lets you pick one (a sole candidate auto-selects); a non-TTY prints the same
+scriptable listing (`name [state] <shortId> … workdir`) and never blocks.
+Discovery sources the durable ledger (records whose pid is alive with a
+matching pgid and start token); a `ps` scan (`PLAN_LOOP_STATUS_SCAN_PS=0`
+disables it) remains a secondary path for records-less live trees.
+
+`plan-loop status --watch [selector]` re-renders the run's status until it
+reaches a terminal state (a non-TTY emits a single snapshot); with no selector
+it watches the most-recent live run.
 
 Exits 2 for an unknown PID, 3 for a live PID outside any plan-loop tree.
 
@@ -113,14 +138,35 @@ POSIX `ps` and `lsof` are the port's deliberate external-binary exceptions
 (`lsof` only resolves a run's workdir from its open `run.log` handle); tree,
 elapsed, and workdir rendering degrade gracefully without them.
 
+## `plan-loop show <selector>` / `plan-loop logs <selector> [-f]`
+
+`show` prints a run's `workdir`, `plan.final.md`, `summary.md`, and `run.log`
+paths plus a one-line state, resolved by the selector grammar above; an
+unresolved selector exits 2.
+
+`logs` prints the run's `run.log` (pure Node; `-f`/`--follow` tail-follows a
+live run until it ends). A run that streamed to its console has no `run.log`;
+`logs` then prints a clear one-line message pointing at the workdir and exits 0
+rather than hanging.
+
+## `plan-loop prune [--keep N] [--max-age DAYS] [--dry-run]`
+
+Bounds the run ledger by removing **terminal** records beyond `--keep` most
+recent (default `PLAN_LOOP_RETAIN_COUNT`, 50) or older than `--max-age` days
+(default `PLAN_LOOP_RETAIN_DAYS`, 30); `--dry-run` reports what it would remove.
+Functional workdirs are never deleted — prune only removes ledger records. Runs
+also self-prune at start, so the store stays bounded without manual upkeep.
+
 ## `plan-loop intervene`
 
 ```text
 plan-loop intervene --work <workdir> [--target all|critic|creator|fixer|reviewer] <message...>
-plan-loop intervene --work <workdir> [--target ...] --stdin
+plan-loop intervene <name|id|PID|--last|--id ID|--name NAME> [--target ...] <message...>
+plan-loop intervene (--work <workdir> | <selector>) [--target ...] --stdin
 ```
 
-Appends `{id, ts, target, message}` to `operator-interventions.jsonl`. Active
-entries are injected into the targeted roles' prompts on the next call and
-marked migrated once a revision lands. Invalid targets exit 1; a missing
-workdir or empty message exits 2.
+Appends `{id, ts, target, message}` to `operator-interventions.jsonl`. The
+target workdir comes from `--work` or, when absent, from the selector grammar
+above. Active entries are injected into the targeted roles' prompts on the next
+call and marked migrated once a revision lands. Invalid targets exit 1; a
+missing workdir, unresolved selector, or empty message exits 2.

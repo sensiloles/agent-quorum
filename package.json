@@ -44,6 +44,7 @@
   ],
   "scripts": {
     "dev": "tsx src/cli/main.ts",
+    "plan:self": "PLAN_LOOP_PLANS_DIR=.agents/plans tsx src/cli/main.ts",
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",

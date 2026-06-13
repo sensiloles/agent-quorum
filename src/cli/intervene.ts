@@ -2,8 +2,33 @@ import { appendFileSync, existsSync, readFileSync, statSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import path from 'node:path';
 import { HaltError } from '../runtime/halt.js';
+import { resolveArtifactRoots } from '../runtime/paths.js';
 import { nowUtcStamp } from '../core/artifacts.js';
 import { INTERVENE_USAGE } from './help.js';
+import { parseSelector, resolveSelector, type Selector } from './select.js';
+
+function interveneSelector(
+  idValue: string | undefined,
+  nameValue: string | undefined,
+  last: boolean,
+  messageParts: string[],
+): Selector | undefined {
+  if (idValue !== undefined) {
+    return { kind: 'id', value: idValue };
+  }
+  if (nameValue !== undefined) {
+    return { kind: 'name', value: nameValue };
+  }
+  if (last) {
+    return { kind: 'last' };
+  }
+  if (messageParts.length === 0) {
+    return undefined;
+  }
+  const selector = parseSelector(messageParts[0]);
+  messageParts.shift();
+  return selector;
+}
 
 function usage(): never {
   process.stderr.write(INTERVENE_USAGE);
@@ -17,12 +42,43 @@ export function runInterveneCli(
   let work = '';
   let target = 'all';
   let readStdin = false;
+  let last = false;
+  let idValue: string | undefined;
+  let nameValue: string | undefined;
   const messageParts: string[] = [];
 
   let i = 0;
   while (i < args.length) {
     const arg = args[i] ?? '';
     switch (true) {
+      case arg === '--last':
+        last = true;
+        i += 1;
+        break;
+      case arg === '--id': {
+        idValue = args[i + 1] ?? '';
+        if (idValue === '') {
+          usage();
+        }
+        i += 2;
+        break;
+      }
+      case arg.startsWith('--id='):
+        idValue = arg.slice('--id='.length);
+        i += 1;
+        break;
+      case arg === '--name': {
+        nameValue = args[i + 1] ?? '';
+        if (nameValue === '') {
+          usage();
+        }
+        i += 2;
+        break;
+      }
+      case arg.startsWith('--name='):
+        nameValue = arg.slice('--name='.length);
+        i += 1;
+        break;
       case arg === '--work': {
         work = args[i + 1] ?? '';
         if (work === '') {
@@ -73,7 +129,16 @@ export function runInterveneCli(
   }
 
   if (work === '') {
-    usage();
+    const selector = interveneSelector(idValue, nameValue, last, messageParts);
+    if (selector === undefined) {
+      usage();
+    }
+    const resolved = resolveSelector(selector, { stateDir: resolveArtifactRoots().stateDir });
+    if (resolved === undefined) {
+      process.stderr.write('no run matches selector\n');
+      return 2;
+    }
+    work = resolved.workDir;
   }
   if (!['all', 'critic', 'creator', 'fixer', 'reviewer'].includes(target)) {
     process.stderr.write(`invalid target: ${target}\n`);

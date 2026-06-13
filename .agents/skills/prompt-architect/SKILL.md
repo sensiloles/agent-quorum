@@ -8,8 +8,8 @@ description: Compose problem-first XML prompts and agent-quorum self-planning ru
 Transform a brief or vague request into a problem-describing prompt for a
 downstream coding agent. The prompt hands the agent what is known about the
 problem and lets it choose the solution shape. For this repository, the primary
-downstream runner is the local `agent-quorum` self-planning harness:
-`scripts/plan-agent-quorum.ts`.
+downstream runner is the local `agent-quorum` self-planning loop, driven through
+the `plan:self` package script (the `plan-loop` bin, run from source).
 
 This is the only command in the chain that may start `agent-quorum`, and it does
 so only after explicit operator confirmation.
@@ -307,7 +307,7 @@ Before commands, choose iteration caps:
 Command template:
 
 ```sh
-cd <repo-absolute-path> && pnpm run build && pnpm exec tsx scripts/plan-agent-quorum.ts --work <workdir-absolute-path> --effort <effort> --iters <n> --prompt <prompt-absolute-path>
+cd <repo-absolute-path> && PLAN_LOOP_WORK_DIR=<workdir-absolute-path> pnpm run plan:self -- --effort <effort> --iters <n> --prompt <prompt-absolute-path>
 ```
 
 Keep commands identical except `--effort`, `--iters`, and workdir suffix.
@@ -346,7 +346,7 @@ Run profiles (quality -> speed):
 Max:
 
 ```sh
-cd /Users/<you>/agent-quorum && pnpm run build && pnpm exec tsx scripts/plan-agent-quorum.ts --work /Users/<you>/agent-quorum/.agents/plans/loop-api-consumer-example-max --effort max --iters 10 --prompt /Users/<you>/agent-quorum/.agents/prompts/api-consumer-example.md
+cd /Users/<you>/agent-quorum && PLAN_LOOP_WORK_DIR=/Users/<you>/agent-quorum/.agents/plans/loop-api-consumer-example-max pnpm run plan:self -- --effort max --iters 10 --prompt /Users/<you>/agent-quorum/.agents/prompts/api-consumer-example.md
 ```
 
 Launch `agent-quorum` now?

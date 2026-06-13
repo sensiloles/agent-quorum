@@ -41,7 +41,7 @@ These are canonical tokens. Translating them breaks the plan:
 
 - File and directory paths, and `file:line` references (`services/js-svc-assistant-api/src/aggregator.ts:42`).
 - Code identifiers: function, variable, type, class, module, and field names.
-- Shell commands and CLI invocations (`pnpm run check`, `pnpm exec tsx scripts/plan-agent-quorum.ts`, `git status`).
+- Shell commands and CLI invocations (`pnpm run check`, `pnpm run plan:self`, `git status`).
 - Environment variable names, JSON/YAML keys, flags (`--no-fix`, `PLAN_LOOP_WORK_DIR`).
 - Package, repo, branch, region, port, and product/library/technology names (`agent-quorum`, `plan-loop`, `pino`, `Prometheus`, `Docker`, `Mermaid`).
 - Literal values, version strings, numbers, and anything inside backtick inline `code`.

@@ -16,14 +16,39 @@ export const LAUNCH_USAGE =
 
 export const INTERVENE_USAGE =
   'usage: plan-loop intervene --work <workdir> [--target all|critic|creator|fixer|reviewer] <message...>\n' +
-  '       plan-loop intervene --work <workdir> [--target all|critic|creator|fixer|reviewer] --stdin\n';
+  '       plan-loop intervene <name|id|PID|--last|--id ID|--name NAME> [--target ...] <message...>\n' +
+  '       plan-loop intervene (--work <workdir> | <selector>) [--target ...] --stdin\n';
 
 export const STATUS_USAGE =
   'plan-loop status — show progress of a plan-loop run.\n' +
   '\n' +
   'Usage:\n' +
-  '  plan-loop status <PID>     — any PID in the run’s process tree (main or child)\n' +
-  '  plan-loop status           — list all currently running plan-loop runs\n';
+  '  plan-loop status <PID>          — any PID in the run’s process tree (main or child)\n' +
+  '  plan-loop status                — list runs (interactive picker in a TTY)\n' +
+  '  plan-loop status --watch [sel]  — re-render until the run ends (one snapshot non-TTY)\n';
+
+export const PRUNE_USAGE =
+  'plan-loop prune — bound the run ledger (records only; workdirs are never deleted).\n' +
+  '\n' +
+  'Usage:\n' +
+  '  plan-loop prune [--keep N] [--max-age DAYS] [--dry-run]\n';
+
+export const SHOW_USAGE =
+  'plan-loop show <selector> — print a run’s artifact paths and state.\n' +
+  '\n' +
+  'Usage:\n' +
+  '  plan-loop show <name|id|PID>   — resolve a run and print workdir/plan/summary/log\n' +
+  '  plan-loop show --last          — the most recent run\n' +
+  '  plan-loop show --work <dir>    — an explicit workdir\n';
+
+export const LOGS_USAGE =
+  'plan-loop logs <selector> [-f] — print or follow a run’s run.log.\n' +
+  '\n' +
+  'Usage:\n' +
+  '  plan-loop logs <name|id|PID>      — print run.log\n' +
+  '  plan-loop logs <selector> -f      — follow until the run ends\n' +
+  '  plan-loop logs --last [-f]        — the most recent run\n' +
+  '  plan-loop logs --work <dir> [-f]  — an explicit workdir\n';
 
 export function packageVersion(): string {
   const parsed = JSON.parse(
@@ -79,11 +104,17 @@ export function globalHelp(): string {
     RUN_USAGE +
     '       plan-loop launch [--resume] [--iters N] [--effort {low,high,max}] [--prompt] [--no-fix] [--locale LOCALE] [--no-translate] <input.md>\n' +
     '       plan-loop status [PID]\n' +
+    '       plan-loop show <selector>\n' +
+    '       plan-loop logs <selector> [-f]\n' +
+    '       plan-loop prune [--keep N] [--max-age DAYS] [--dry-run]\n' +
     '       plan-loop intervene --work <workdir> [--target all|critic|creator|fixer|reviewer] <message...>\n' +
     '\n' +
     'subcommands:\n' +
     '  launch      detach a run into its own process group with run.log redirection\n' +
-    '  status      show progress of running plan-loop runs\n' +
+    '  status      show progress of running plan-loop runs (--watch to follow)\n' +
+    '  show        print a run’s artifact paths (resolve by name/id/PID/--last/--work)\n' +
+    '  logs        print or follow a run’s run.log\n' +
+    '  prune       remove terminal run records beyond the retention bound\n' +
     '  intervene   append an operator intervention to a run’s ledger\n' +
     '\n' +
     'flags (core run):\n' +

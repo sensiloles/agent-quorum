@@ -78,7 +78,7 @@ describe('intervene flag parsing', () => {
     ).toBe(0);
     expect(haltCode(() => runInterveneCli(['--work', work, '-h'], () => undefined))).toBe(0);
     expect(haltCode(() => runInterveneCli(['--work', work], () => undefined))).toBe(1);
-    expect(haltCode(() => runInterveneCli(['--target', 'critic', 'x'], () => undefined))).toBe(1);
+    expect(haltCode(() => runInterveneCli(['--target', 'critic'], () => undefined))).toBe(1);
     expect(haltCode(() => runInterveneCli(['--work', ''], () => undefined))).toBe(1);
   });
 });

@@ -4,7 +4,8 @@ import { globalHelp, packageVersion } from './help.js';
 import { runInterveneCli } from './intervene.js';
 import { runLaunchCli } from './launch.js';
 import { runPlanLoopCli } from './run.js';
-import { runStatusCli } from './status.js';
+import { runLogsCli, runPruneCli, runShowCli } from './runs.js';
+import { runStatusCliInteractive } from './status.js';
 
 process.title = 'plan-loop';
 
@@ -13,6 +14,11 @@ process.title = 'plan-loop';
 // anything else (including any file path) is the core run.
 async function main(): Promise<number> {
   const args = process.argv.slice(2);
+  // `pnpm run <script> -- <args>` forwards the literal `--` separator; drop a
+  // leading one so a wrapped invocation routes like the bare bin.
+  if (args[0] === '--') {
+    args.shift();
+  }
   const first = args[0];
   if (first === '--version' || first === '-V') {
     process.stdout.write(`${packageVersion()}\n`);
@@ -26,7 +32,13 @@ async function main(): Promise<number> {
     case 'launch':
       return (await runLaunchCli(args.slice(1))).exitCode;
     case 'status':
-      return runStatusCli(args.slice(1));
+      return runStatusCliInteractive(args.slice(1));
+    case 'show':
+      return runShowCli(args.slice(1));
+    case 'logs':
+      return await runLogsCli(args.slice(1));
+    case 'prune':
+      return runPruneCli(args.slice(1));
     case 'intervene':
       return runInterveneCli(args.slice(1));
     default:

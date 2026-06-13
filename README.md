@@ -95,8 +95,10 @@ Create a task prompt and run the loop:
 plan-loop --prompt my-task.md
 ```
 
-By default the run writes its artifacts to `~/.claude/plans/loop-<base>/` (where
-`<base>` is the input filename). The files you care about are:
+By default the run writes its functional artifacts to
+`~/.agent-quorum/runs/loop-<name>/` (where `<name>` derives from the input
+filename) and its durable run record under `~/.agent-quorum/state/`. The files
+you care about are:
 
 - `plan.final.md` — the converged plan; always the entry point.
 - `summary.md` — a one-page run summary (iterations, health, artifact paths).
@@ -106,18 +108,23 @@ By default the run writes its artifacts to `~/.claude/plans/loop-<base>/` (where
 
 ## CLI
 
-A single `plan-loop` bin fronts four entry points:
+A single `plan-loop` bin fronts these entry points:
 
 ```sh
 plan-loop my-plan.md                      # core loop over an existing plan
 plan-loop --prompt my-prompt.md           # create plan.v0 from a prompt first
 plan-loop launch --effort high task.md    # detached background run + run.log
-plan-loop status [PID]                    # run snapshot (any PID in the tree)
-plan-loop intervene --work <dir> "note"   # inject operator guidance mid-run
+plan-loop status                          # pick a run (TTY) or scriptable listing
+plan-loop show <name|id|PID|--last>       # a run's artifact paths and state
+plan-loop logs <selector> [-f]            # print or follow a run's run.log
+plan-loop intervene <selector> "note"     # inject operator guidance mid-run
+plan-loop prune [--keep N] [--dry-run]    # bound the run ledger
 ```
 
-The full flag reference and exit codes live in [`docs/cli.md`](docs/cli.md), and
-the plan shape gate that existing plan inputs must satisfy is documented in
+Runs are addressable by a durable `runId`/`name` selector; see the end-to-end
+walk-through in [`docs/run-lifecycle.md`](docs/run-lifecycle.md). The full flag
+reference and exit codes live in [`docs/cli.md`](docs/cli.md), and the plan
+shape gate that existing plan inputs must satisfy is documented in
 [`docs/architecture.md#plan-shape-contract`](docs/architecture.md#plan-shape-contract).
 Non-English locales localize Telegram clarification questions and produce
 `plan.final.<locale>.md`; Telegram credentials also enable concise final
@@ -190,6 +197,7 @@ degrades gracefully without it (see [`docs/cli.md`](docs/cli.md)).
 - [`docs/development/agent-skill-flow.md`](docs/development/agent-skill-flow.md)
   — repository-local requirements, handoff, prompt architecture, execution, and
   self-planning workflow.
+- [`examples/`](examples/) — runnable CLI and API walkthroughs of the loop.
 
 ## Development
 
@@ -208,20 +216,18 @@ Work is tracked on the public
 follow-ups straight into the backlog, where they enter the delivery flow
 ([`docs/development/agent-skill-flow.md`](docs/development/agent-skill-flow.md)).
 
-For changes that should be designed by `agent-quorum` itself, build the package
-and run the repository-local dogfood harness:
+For changes that should be designed by `agent-quorum` itself, dogfood the loop
+through the `plan-loop` bin straight from source — see [`examples/`](examples/)
+for the full CLI and API walkthrough:
 
 ```sh
-pnpm run build
-pnpm exec tsx scripts/plan-agent-quorum.ts --prompt .agents/prompts/<slug>.md
+pnpm run plan:self -- --prompt .agents/prompts/<slug>.md
 ```
 
-Harness contract:
-
-- imports the public `agent-quorum` package name;
-- writes plan-loop workdirs under `.agents/plans/`;
-- accepts `--work`, `--effort`, `--iters`, `--locale`, `--translate`, and
-  `--fix` / `--no-fix`.
+`plan:self` runs `src/cli/main.ts` via `tsx` (no build), points run artifacts at
+`.agents/plans/`, and accepts the usual `--effort`, `--iters`, `--locale`,
+`--translate`, and `--fix` / `--no-fix` flags; set `PLAN_LOOP_WORK_DIR` to pin a
+workdir name.
 
 Artifact ownership:
 

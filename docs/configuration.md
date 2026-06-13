@@ -54,17 +54,30 @@ secrets and other local credentials.
 
 ### Run placement
 
-| Variable                | Meaning                                          |
-| ----------------------- | ------------------------------------------------ |
-| `PLAN_LOOP_CONFIG_FILE` | config file override                             |
-| `PLAN_LOOP_WORK_DIR`    | explicit workdir (default `<plans>/loop-<base>`) |
-| `PLAN_LOOP_PLANS_DIR`   | plans root (default `~/.claude/plans`)           |
-| `PLAN_LOOP_STATE_DIR`   | run registry dir (default `<plans>/.runs`)       |
-| `PLAN_LOOP_RESUME`      | `1` resumes from the last stable plan            |
+| Variable                 | Meaning                                                       |
+| ------------------------ | ------------------------------------------------------------- |
+| `PLAN_LOOP_CONFIG_FILE`  | config file override                                          |
+| `PLAN_LOOP_HOME`         | artifact root (default `~/.agent-quorum`)                     |
+| `PLAN_LOOP_WORK_DIR`     | explicit workdir (default `<home>/runs/loop-<name>`)          |
+| `PLAN_LOOP_PLANS_DIR`    | functional runs root (default `<home>/runs`; legacy override) |
+| `PLAN_LOOP_STATE_DIR`    | system ledger dir (default `<home>/state`; legacy override)   |
+| `PLAN_LOOP_RETAIN_COUNT` | prune keeps this many terminal records (default 50)           |
+| `PLAN_LOOP_RETAIN_DAYS`  | prune drops terminal records older than this (default 30)     |
+| `PLAN_LOOP_RESUME`       | `1` resumes from the last stable plan                         |
 
-The library API additionally accepts `workDir`/`configFile` as typed options
-on `runPlanLoop`/`launchPlanLoop`; resolution precedence is option > env >
-default. The CLI contract stays env-first ([details](api.md)).
+The default root splits **functional** output (`<home>/runs/loop-<name>`, the
+per-run workdirs holding `plan.final.md`/`summary.md`/`run.log`) from the
+**system** ledger (`<home>/state/runs/<runId>.json`, the durable run records).
+A clean install writes nothing under `~/.claude`; there is no migration of
+pre-existing `~/.claude/plans` trees (setting `PLAN_LOOP_HOME=$HOME/.claude/plans`
+recreates the old location if needed). Setting only `PLAN_LOOP_PLANS_DIR` keeps
+the legacy single-var layout (`<plans>/.runs` for state).
+
+The library API additionally accepts `home`/`workDir`/`configFile` as typed
+options on `runPlanLoop`/`launchPlanLoop`, and a `home` lookup option on
+`listRuns`/`getRun`/`getRunLogPath`/`interveneRun`/`pruneRuns`; resolution
+precedence is option > env > default. The CLI contract stays env-first
+([details](api.md)).
 
 ### Loop settings (env layer)
 

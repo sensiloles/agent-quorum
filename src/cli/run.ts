@@ -8,13 +8,14 @@ import {
   statSync,
   writeFileSync,
 } from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { loadPlanLoopDotenv, packageRoot, projectRoot } from '../runtime/env.js';
 import { fileLineCount } from '../runtime/files.js';
 import { installSignalTeardown, ownPgid } from '../runtime/exec.js';
 import { HaltError } from '../runtime/halt.js';
-import { err, log } from '../runtime/log.js';
+import { disableRunLogSink, enableRunLogSink, err, log } from '../runtime/log.js';
+import { resolveArtifactRoots } from '../runtime/paths.js';
+import { procStartToken } from '../runtime/proc.js';
 import { Scratch } from '../runtime/scratch.js';
 import {
   cleanupRunRegistry,
@@ -22,6 +23,15 @@ import {
   writeRunMetadata,
   type RunMetadata,
 } from '../core/artifacts.js';
+import {
+  deriveRunName,
+  finalizeRunRecord,
+  pruneRuns,
+  readRunRecords,
+  runNameFromWorkdir,
+  writeRunRecord,
+  type RunState,
+} from '../core/run-store.js';
 import { runClarificationGate } from '../core/clarify.js';
 import {
   configFilePath,
@@ -406,38 +416,96 @@ export async function runPlanLoopCli(
   const knobs = resolveWatchdogKnobs();
   const effort = effortMatrix(settings.effort);
 
-  const plansDir = process.env.PLAN_LOOP_PLANS_DIR ?? path.join(os.homedir(), '.claude', 'plans');
+  const { runsDir, stateDir } = resolveArtifactRoots(overrides);
+  const plansDir = runsDir;
   const inputPath = absolutePath(parsed.inputPath);
   const base = path.basename(inputPath, '.md');
-  let work =
-    overrides.workDir ?? process.env.PLAN_LOOP_WORK_DIR ?? path.join(plansDir, `loop-${base}`);
-  if (!path.isAbsolute(work)) {
-    work = path.join(process.cwd(), work);
-  }
-  mkdirSync(work, { recursive: true });
-  work = canonicalDir(work);
-  let runStateDir = process.env.PLAN_LOOP_STATE_DIR ?? path.join(plansDir, '.runs');
+
+  let runStateDir = stateDir;
   if (!path.isAbsolute(runStateDir)) {
     runStateDir = path.join(process.cwd(), runStateDir);
   }
   mkdirSync(runStateDir, { recursive: true });
   runStateDir = canonicalDir(runStateDir);
+
+  const explicitWork = overrides.workDir ?? process.env.PLAN_LOOP_WORK_DIR;
+  const forwardedName = process.env.PLAN_LOOP_RUN_NAME;
+  const explicitName =
+    forwardedName !== undefined && forwardedName !== '' ? forwardedName : undefined;
+  let work: string;
+  let name: string;
+  if (explicitWork !== undefined && explicitWork !== '') {
+    work = path.isAbsolute(explicitWork) ? explicitWork : path.join(process.cwd(), explicitWork);
+    name = explicitName ?? runNameFromWorkdir(work);
+  } else {
+    name = explicitName ?? deriveRunName(readRunRecords(runStateDir), base);
+    work = path.join(plansDir, `loop-${name}`);
+  }
+  mkdirSync(work, { recursive: true });
+  work = canonicalDir(work);
+
+  const logPath = path.join(work, 'run.log');
   const runMetaFile = path.join(work, 'run.meta.tsv');
   const runRegistryFile = path.join(runStateDir, `${process.pid}.tsv`);
   const notifyCompletion = createCompletionNotifier(inputPath, work);
 
+  const pgid = ownPgid();
+  const startToken = procStartToken(process.pid) ?? '';
+  const forwardedRunId = process.env.PLAN_LOOP_RUN_ID;
+  const startedAt = nowUtcStamp();
+  let runId = '';
+  const finalizeRun = (state: RunState, exitCode: number, finalStatus?: string): void => {
+    if (runId === '') {
+      return;
+    }
+    finalizeRunRecord(runStateDir, runId, {
+      state,
+      exitCode,
+      endedAt: nowUtcStamp(),
+      ...(finalStatus !== undefined ? { finalStatus } : {}),
+    });
+  };
+
   try {
+    if (process.env.PLAN_LOOP_STDIO_IS_RUNLOG !== '1') {
+      enableRunLogSink(logPath);
+    }
+    runId = writeRunRecord(
+      runStateDir,
+      {
+        name,
+        pid: process.pid,
+        pgid,
+        procStartToken: startToken,
+        mode: parsed.mode,
+        inputPath,
+        workDir: work,
+        logPath,
+        plansDir,
+        startedAt,
+        effort: settings.effort,
+        state: 'running',
+      },
+      forwardedRunId !== undefined && forwardedRunId !== '' ? { fixedRunId: forwardedRunId } : {},
+    ).runId;
+    log(`run ${runId} (${name})`);
+    try {
+      pruneRuns(runStateDir);
+    } catch {
+      /* best-effort retention; never block a run on prune */
+    }
+
     const matrix = resolveRoleConfig(configFile);
     const permissions = resolveRolePermissions(configFile);
 
     const metadata: RunMetadata = {
       pid: process.pid,
-      pgid: ownPgid(),
+      pgid,
       mode: parsed.mode,
       inputPath,
       workDir: work,
       plansDir,
-      startedAt: nowUtcStamp(),
+      startedAt,
       effort: settings.effort,
       sessionMode: String(effort.sessionMode),
       creatorOneShot: String(effort.creatorOneShot),
@@ -476,6 +544,8 @@ export async function runPlanLoopCli(
         tools: permissions.reviewer.tools,
         disallowedTools: permissions.reviewer.disallowedTools,
       },
+      runId,
+      name,
     };
     writeRunMetadata(runMetaFile, runRegistryFile, metadata);
 
@@ -496,8 +566,9 @@ export async function runPlanLoopCli(
       if (!existsSync(skillFile)) {
         process.stderr.write(`missing: ${skillFile}\n`);
         cleanupRunRegistry(runRegistryFile);
+        finalizeRun('failed', 1);
         await notifyCompletion({ exitCode: 1, reason: `missing: ${skillFile}` });
-        return { exitCode: 1, report: { workDir: work } };
+        return { exitCode: 1, report: { workDir: work, runId, name } };
       }
     }
 
@@ -507,8 +578,9 @@ export async function runPlanLoopCli(
     if (preflightFailure !== undefined) {
       process.stderr.write(`${preflightFailure.message}\n`);
       cleanupRunRegistry(runRegistryFile);
+      finalizeRun('failed', 1);
       await notifyCompletion({ exitCode: 1, reason: preflightFailure.message });
-      return { exitCode: 1, report: { workDir: work } };
+      return { exitCode: 1, report: { workDir: work, runId, name } };
     }
 
     const scratch = Scratch.create(base);
@@ -572,11 +644,12 @@ export async function runPlanLoopCli(
         if (!existsSync(v0) || statSync(v0).size === 0) {
           const gateOk = await runClarificationGate(ctx, inputPath);
           if (!gateOk) {
+            finalizeRun('failed', 7);
             await notifyCompletion({
               exitCode: 7,
               reason: 'clarification gate cancelled or failed',
             });
-            return { exitCode: 7, report: { workDir: work } };
+            return { exitCode: 7, report: { workDir: work, runId, name } };
           }
           log(`creating plan v0 from prompt (${matrix.creator.runner} ${matrix.creator.model})`);
           await runCreatorCreate(ctx, inputPath, v0);
@@ -652,8 +725,9 @@ export async function runPlanLoopCli(
       });
 
       log(`done. summary: ${path.join(work, 'summary.md')}`);
-      const report = buildRunReport(ctx, iter);
+      const report = { ...buildRunReport(ctx, iter), runId, name };
       const exitCode = finalStatus === 'blocked' ? 6 : 0;
+      finalizeRun(finalStatus === 'blocked' ? 'blocked' : 'finished', exitCode, finalStatus);
       await notifyCompletion({
         exitCode,
         status: finalStatus,
@@ -666,7 +740,10 @@ export async function runPlanLoopCli(
       cleanup();
     }
   } catch (error) {
+    finalizeRun('failed', errorExitCode(error));
     await notifyCompletion({ exitCode: errorExitCode(error), reason: errorReason(error) });
     throw error;
+  } finally {
+    disableRunLogSink();
   }
 }

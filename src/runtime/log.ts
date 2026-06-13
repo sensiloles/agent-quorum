@@ -1,3 +1,5 @@
+import { closeSync, openSync, writeSync } from 'node:fs';
+
 export interface ColorStream {
   isTTY?: boolean;
 }
@@ -13,14 +15,52 @@ export function colorsEnabled(stream: ColorStream = process.stderr): boolean {
   return stream.isTTY === true;
 }
 
-function prefix(colorCode: string): string {
-  return colorsEnabled() ? `${colorCode}[plan-loop]\x1b[0m` : '[plan-loop]';
+const PLAN_LOOP_PREFIX = '[plan-loop]';
+const ANSI_PATTERN = new RegExp(`${String.fromCharCode(27)}\\[[0-9;]*m`, 'g');
+
+let runLogFd: number | undefined;
+
+// Mirror every `[plan-loop]` line into a run's own run.log for in-process runs.
+// The detached launch child already has run.log as its stderr fd, so it sets
+// PLAN_LOOP_STDIO_IS_RUNLOG=1 and leaves the sink disabled to avoid double
+// writes, keeping the detached run.log byte-identical.
+export function enableRunLogSink(file: string): void {
+  disableRunLogSink();
+  try {
+    runLogFd = openSync(file, 'a');
+  } catch {
+    runLogFd = undefined;
+  }
+}
+
+export function disableRunLogSink(): void {
+  if (runLogFd === undefined) {
+    return;
+  }
+  try {
+    closeSync(runLogFd);
+  } catch {
+    /* best effort */
+  }
+  runLogFd = undefined;
+}
+
+function emit(colorCode: string, message: string): void {
+  const prefix = colorsEnabled() ? `${colorCode}${PLAN_LOOP_PREFIX}\x1b[0m` : PLAN_LOOP_PREFIX;
+  process.stderr.write(`${prefix} ${message}\n`);
+  if (runLogFd !== undefined) {
+    try {
+      writeSync(runLogFd, `${PLAN_LOOP_PREFIX} ${message.replace(ANSI_PATTERN, '')}\n`);
+    } catch {
+      /* never let logging crash the run */
+    }
+  }
 }
 
 export function log(message: string): void {
-  process.stderr.write(`${prefix('\x1b[36m')} ${message}\n`);
+  emit('\x1b[36m', message);
 }
 
 export function err(message: string): void {
-  process.stderr.write(`${prefix('\x1b[31m')} ${message}\n`);
+  emit('\x1b[31m', message);
 }

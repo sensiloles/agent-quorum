@@ -80,6 +80,8 @@ function sampleMeta(workDir: string): RunMetadata {
     },
     fixer: { runner: 'claude', model: 'm3', reasoning: 'r3', tools: 't3', disallowedTools: 'd3' },
     reviewer: { runner: 'codex', model: 'm4', reasoning: 'r4', tools: 't4', disallowedTools: 'd4' },
+    runId: 'r000000abc-0123456789abcdef0123',
+    name: 'in',
   };
 }
 
@@ -94,17 +96,20 @@ afterEach(() => {
 });
 
 describe('run metadata', () => {
-  it('renders the exact reference key set and order — four roles, no translator', () => {
+  it('keeps the reference key sequence as a prefix and appends run_id + name', () => {
     const rendered = renderRunMetadata(sampleMeta('/tmp/work'));
     const keys = rendered
       .trimEnd()
       .split('\n')
       .map((line) => line.split('\t')[0]);
-    expect(keys).toEqual(REFERENCE_KEY_ORDER);
+    expect(keys.slice(0, REFERENCE_KEY_ORDER.length)).toEqual(REFERENCE_KEY_ORDER);
+    expect(keys.slice(REFERENCE_KEY_ORDER.length)).toEqual(['run_id', 'name']);
     expect(rendered).toContain(`log_path\t${path.join('/tmp/work', 'run.log')}\n`);
     expect(rendered).toContain(
       `interventions_path\t${path.join('/tmp/work', 'operator-interventions.jsonl')}\n`,
     );
+    expect(rendered).toContain('run_id\tr000000abc-0123456789abcdef0123\n');
+    expect(rendered).toContain('name\tin\n');
   });
 
   it('writes both meta and registry files atomically and cleans the registry', () => {

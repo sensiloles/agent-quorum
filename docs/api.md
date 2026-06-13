@@ -6,6 +6,11 @@ import {
   launchPlanLoop,
   getRunStatus,
   addIntervention,
+  listRuns,
+  getRun,
+  getRunLogPath,
+  interveneRun,
+  pruneRuns,
   ExitCode,
   type RunPlanLoopOptions,
   type LaunchPlanLoopOptions,
@@ -14,6 +19,12 @@ import {
   type LaunchResult,
   type CommandResult,
   type InterventionTarget,
+  type RunLookupOptions,
+  type RunRecord,
+  type RunSelector,
+  type RunState,
+  type RetentionPolicy,
+  type PruneResult,
   type Role,
   type Runner,
   type Effort,
@@ -83,9 +94,13 @@ mirrors the `split_decision` summary line and is present whenever
 `plan.split.json` was written; `packageDir` is present only when the split
 policy fired and a `plan.package/` was emitted. Both are additive —
 `finalPlanPath` is never replaced by a directory-only result, so existing
-callers are unaffected. Artifacts land in the resolved workdir; for
-both `workDir` and `configFile` the precedence is option > environment
-variable > default (`<plans>/loop-<base>` / the packaged `plan-loop.json`).
+callers are unaffected. `runId` and `name` identify the run (the same id the
+start surfaces report); they are additive on `RunResult`/`LaunchResult`.
+Artifacts land in the resolved workdir; for `home`, `workDir`, and
+`configFile` the precedence is option > environment variable > default
+(`<home>/runs/loop-<name>` / `~/.agent-quorum` / the packaged `plan-loop.json`).
+`home` relocates the whole artifact root (`runs/` + `state/`) without mutating
+`process.env`.
 `locale` is the typed counterpart of `--locale`; it defaults to `en`.
 Clarification questions sent through Telegram target that locale. Non-English
 locales also run the translate pass and write `plan.final.<locale>.md`; `en`
@@ -131,7 +146,8 @@ const one = getRunStatus(12345); // any PID in a run's process tree
 ```
 
 Returns `{ exitCode, output }` with the rendered snapshot; exit 2 for an
-unknown PID, 3 for a PID outside any plan-loop tree.
+unknown PID, 3 for a PID outside any plan-loop tree. The signature and behavior
+are unchanged; with no query, `output` is now the scriptable run listing.
 
 ## addIntervention(workDir, message, target?)
 
@@ -141,7 +157,34 @@ const result = addIntervention('/path/to/loop-task', 'prefer the staged rollout'
 ```
 
 `target` defaults to `'all'`; valid targets are `all | critic | creator |
-fixer | reviewer` (the translator is deliberately exempt).
+fixer | reviewer` (the translator is deliberately exempt). `addIntervention`
+keeps its `(workDir, message, target?)` signature.
+
+## Selector lookups
+
+```ts
+const runs = listRuns(); // every run record under the resolved root
+const run = getRun('my-plan'); // by name, runId (or prefix), or { kind: 'last' }
+const log = getRunLogPath('my-plan'); // run.log path, or undefined if none exists
+interveneRun('my-plan', 'prefer the staged rollout', 'creator');
+const pruned = pruneRuns({ keepCount: 50, maxAgeDays: 30, dryRun: true });
+```
+
+`listRuns`/`getRun`/`getRunLogPath`/`interveneRun`/`pruneRuns` are the library
+counterparts of the `status`/`show`/`logs`/`intervene`/`prune` commands. A
+selector is a string token (pid, runId or prefix, or name) or a structured
+`RunSelector` (`{ kind: 'last' }`, `{ kind: 'work'; value }`); a pid resolves a
+live run only. `getRun` returns a `RunRecord | undefined` (a bare `--work`
+selector has no record); `interveneRun` resolves the selector to its workdir
+then delegates to `addIntervention`, returning `{ exitCode: 2 }` when nothing
+matches. `pruneRuns(policy?)` removes terminal records only (never workdirs).
+
+Each lookup accepts a trailing `RunLookupOptions` with `home?` so a run created
+under a custom `home` is reachable without mutating `process.env`:
+
+```ts
+const run = getRun('my-plan', { home: '/tmp/sandbox' });
+```
 
 ## ExitCode
 

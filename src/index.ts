@@ -1,12 +1,36 @@
+import { existsSync } from 'node:fs';
 import { HaltError } from './runtime/halt.js';
+import { resolveArtifactRoots } from './runtime/paths.js';
 import { runInterveneCli } from './cli/intervene.js';
 import { runLaunchCli } from './cli/launch.js';
 import { runPlanLoopCli, type RunOutcome } from './cli/run.js';
 import { runStatusCli } from './cli/status.js';
+import {
+  parseSelector,
+  resolveSelector,
+  isRunRecord,
+  resolveLogPath,
+  type Selector,
+} from './cli/select.js';
+import {
+  pruneRuns as pruneRunsStore,
+  readRunRecords,
+  type PruneResult,
+  type RetentionPolicy,
+  type RunRecord,
+} from './core/run-store.js';
 import type { Effort, RunOverrides } from './types.js';
 
 export { ExitCode } from './exit-codes.js';
 export type { Effort, Role, RunMode, RunOverrides, Runner } from './types.js';
+export type { PruneResult, RetentionPolicy, RunRecord, RunState } from './core/run-store.js';
+export type RunSelector = Selector;
+
+// Root override for lookups so a run created under a custom `home` is reachable
+// without mutating process.env. Resolves through resolveArtifactRoots.
+export interface RunLookupOptions {
+  home?: string;
+}
 
 export interface RunPlanLoopOptions {
   input: string;
@@ -18,6 +42,7 @@ export interface RunPlanLoopOptions {
   locale?: string;
   workDir?: string;
   configFile?: string;
+  home?: string;
 }
 
 export interface LaunchPlanLoopOptions extends RunPlanLoopOptions {
@@ -37,6 +62,8 @@ export interface RunHealth {
 
 export interface RunResult {
   exitCode: number;
+  runId?: string;
+  name?: string;
   workDir?: string;
   finalPlanPath?: string;
   summaryPath?: string;
@@ -52,6 +79,8 @@ export interface CommandResult {
 }
 
 export interface LaunchResult extends CommandResult {
+  runId?: string;
+  name?: string;
   workDir?: string;
   pid?: number;
   logPath?: string;
@@ -94,6 +123,7 @@ function runOverrides(options: RunPlanLoopOptions): RunOverrides {
   return {
     ...(options.workDir !== undefined ? { workDir: options.workDir } : {}),
     ...(options.configFile !== undefined ? { configFile: options.configFile } : {}),
+    ...(options.home !== undefined ? { home: options.home } : {}),
   };
 }
 
@@ -105,6 +135,8 @@ function toRunResult(outcome: RunOutcome): RunResult {
   return {
     exitCode: outcome.exitCode,
     workDir: report.workDir,
+    ...(report.runId !== undefined ? { runId: report.runId } : {}),
+    ...(report.name !== undefined ? { name: report.name } : {}),
     ...(report.finalPlanPath !== undefined ? { finalPlanPath: report.finalPlanPath } : {}),
     ...(report.summaryPath !== undefined ? { summaryPath: report.summaryPath } : {}),
     ...(report.iterations !== undefined ? { iterations: report.iterations } : {}),
@@ -134,6 +166,18 @@ function haltToExit(error: unknown): number {
   throw error;
 }
 
+function captureCommand(run: (write: (text: string) => void) => number): CommandResult {
+  let output = '';
+  try {
+    const exitCode = run((text) => {
+      output += text;
+    });
+    return { exitCode, output };
+  } catch (error) {
+    return { exitCode: haltToExit(error), output };
+  }
+}
+
 // The core plan → critique → update loop, byte-contract identical to the
 // reference plan-loop.sh run. Returns the exit code; never calls process.exit.
 export async function runPlanLoop(options: RunPlanLoopOptions): Promise<RunResult> {
@@ -161,6 +205,8 @@ export async function launchPlanLoop(options: LaunchPlanLoopOptions): Promise<La
     return {
       exitCode: outcome.exitCode,
       output,
+      ...(outcome.runId !== undefined ? { runId: outcome.runId } : {}),
+      ...(outcome.name !== undefined ? { name: outcome.name } : {}),
       ...(outcome.workDir !== undefined ? { workDir: outcome.workDir } : {}),
       ...(outcome.pid !== undefined ? { pid: outcome.pid } : {}),
       ...(outcome.logPath !== undefined ? { logPath: outcome.logPath } : {}),
@@ -173,15 +219,7 @@ export async function launchPlanLoop(options: LaunchPlanLoopOptions): Promise<La
 // Status snapshot: a pid (any process in the run's tree) or no query to list
 // every currently running plan-loop run.
 export function getRunStatus(query?: number): CommandResult {
-  let output = '';
-  try {
-    const exitCode = runStatusCli(query === undefined ? [] : [String(query)], (text) => {
-      output += text;
-    });
-    return { exitCode, output };
-  } catch (error) {
-    return { exitCode: haltToExit(error), output };
-  }
+  return captureCommand((write) => runStatusCli(query === undefined ? [] : [String(query)], write));
 }
 
 // Append an operator intervention to a run's ledger.
@@ -190,16 +228,79 @@ export function addIntervention(
   message: string,
   target: InterventionTarget = 'all',
 ): CommandResult {
-  let output = '';
-  try {
-    const exitCode = runInterveneCli(
-      ['--work', workDir, '--target', target, '--', message],
-      (text) => {
-        output += text;
-      },
-    );
-    return { exitCode, output };
-  } catch (error) {
-    return { exitCode: haltToExit(error), output };
+  return captureCommand((write) =>
+    runInterveneCli(['--work', workDir, '--target', target, '--', message], write),
+  );
+}
+
+function lookupStateDir(options?: RunLookupOptions): string {
+  return resolveArtifactRoots(options?.home !== undefined ? { home: options.home } : {}).stateDir;
+}
+
+function toSelector(selector: string | RunSelector): Selector | undefined {
+  return typeof selector === 'string' ? parseSelector(selector) : selector;
+}
+
+// List every run record under the resolved root, most-recent state not inferred
+// here (read record.state or pass to status for liveness).
+export function listRuns(options?: RunLookupOptions): RunRecord[] {
+  return readRunRecords(lookupStateDir(options));
+}
+
+// Resolve a selector (string token, or a structured RunSelector for
+// --last/--work) to its run record. A bare --work selector has no record and
+// returns undefined; use getRunLogPath for its log.
+export function getRun(
+  selector: string | RunSelector,
+  options?: RunLookupOptions,
+): RunRecord | undefined {
+  const parsed = toSelector(selector);
+  if (parsed === undefined) {
+    return undefined;
   }
+  const resolved = resolveSelector(parsed, { stateDir: lookupStateDir(options) });
+  return resolved !== undefined && isRunRecord(resolved) ? resolved : undefined;
+}
+
+// The API counterpart of `logs`: the run's run.log path when it exists, else
+// undefined (the run streamed to its console or does not resolve).
+export function getRunLogPath(
+  selector: string | RunSelector,
+  options?: RunLookupOptions,
+): string | undefined {
+  const parsed = toSelector(selector);
+  if (parsed === undefined) {
+    return undefined;
+  }
+  const resolved = resolveSelector(parsed, { stateDir: lookupStateDir(options) });
+  if (resolved === undefined) {
+    return undefined;
+  }
+  const logPath = resolveLogPath(resolved);
+  return existsSync(logPath) ? logPath : undefined;
+}
+
+// Resolve a selector to its workDir and append an intervention there. Exit code
+// 2 when the selector resolves nothing; otherwise mirrors addIntervention.
+export function interveneRun(
+  selector: string | RunSelector,
+  message: string,
+  target: InterventionTarget = 'all',
+  options?: RunLookupOptions,
+): CommandResult {
+  const parsed = toSelector(selector);
+  const resolved =
+    parsed === undefined
+      ? undefined
+      : resolveSelector(parsed, { stateDir: lookupStateDir(options) });
+  if (resolved === undefined) {
+    return { exitCode: 2, output: 'no run matches selector\n' };
+  }
+  return addIntervention(resolved.workDir, message, target);
+}
+
+// Bound the durable ledger by retention policy (record-only; never deletes
+// functional workdirs). See RetentionPolicy for defaults and env overrides.
+export function pruneRuns(policy?: RetentionPolicy, options?: RunLookupOptions): PruneResult {
+  return pruneRunsStore(lookupStateDir(options), policy ?? {});
 }

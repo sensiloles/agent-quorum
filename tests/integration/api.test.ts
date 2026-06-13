@@ -15,11 +15,16 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   addIntervention,
   ExitCode,
+  getRun,
+  getRunLogPath,
   getRunStatus,
+  interveneRun,
   launchPlanLoop,
+  listRuns,
   runPlanLoop,
 } from '../../src/index.js';
 import { resetConfigCache } from '../../src/core/config.js';
+import { readRunRecords } from '../../src/core/run-store.js';
 import {
   captureStderr,
   emptyCritique,
@@ -137,6 +142,41 @@ describe('runPlanLoop (in-process)', () => {
       invalid: Number(healthLine?.[4]),
       validAddressedPct: Number(healthLine?.[5]),
     });
+
+    expect(result.runId).toMatch(/^r[0-9a-z]+-[0-9a-f]+$/);
+    expect(result.name).toBe('work');
+    const runLog = path.join(canonicalWork, 'run.log');
+    expect(existsSync(runLog)).toBe(true);
+    expect(readFileSync(runLog, 'utf8')).toContain('[plan-loop]');
+  });
+
+  it('keeps two same-input runs in distinct workdirs, each addressable by its runId', async () => {
+    const defaultWorkEnv = baseEnv({
+      PLAN_LOOP_WORK_DIR: undefined,
+      FAKE_CODEX_OUTPUT: path.join(tmp, 'empty.json'),
+    });
+    const options = {
+      input: path.join(tmp, 'input.md'),
+      iters: 1,
+      effort: 'low' as const,
+      fix: false,
+      translate: false,
+    };
+    const first = await withEnvAsync(defaultWorkEnv, () => runPlanLoop(options));
+    const second = await withEnvAsync(defaultWorkEnv, () => runPlanLoop(options));
+
+    expect(first.exitCode).toBe(ExitCode.Ok);
+    expect(second.exitCode).toBe(ExitCode.Ok);
+    expect(first.name).toBe('input');
+    expect(second.name).toBe('input-2');
+    expect(first.workDir).toBe(realpathSync(path.join(tmp, 'plans', 'loop-input')));
+    expect(second.workDir).toBe(realpathSync(path.join(tmp, 'plans', 'loop-input-2')));
+    expect(first.runId).not.toBe(second.runId);
+
+    const records = readRunRecords(path.join(tmp, 'state'));
+    const byName = new Map(records.map((entry) => [entry.runId, entry.name]));
+    expect(first.runId !== undefined && byName.get(first.runId)).toBe('input');
+    expect(second.runId !== undefined && byName.get(second.runId)).toBe('input-2');
   });
 
   it('exposes additive package fields: no-split keeps finalPlanPath and reports no package', async () => {
@@ -321,6 +361,9 @@ describe('launchPlanLoop (in-process)', () => {
     expect(result.pid).toBe(pid);
     expect(result.workDir).toBe(path.join(tmp, 'plans', 'loop-input'));
     expect(result.logPath).toBe(path.join(tmp, 'plans', 'loop-input', 'run.log'));
+    expect(result.runId).toMatch(/^r[0-9a-z]+-[0-9a-f]+$/);
+    expect(result.name).toBe('input');
+    expect(result.output).toContain(`run:   ${result.runId ?? ''}`);
 
     const statusEnv = {
       PLAN_LOOP_PLANS_DIR: path.join(tmp, 'plans'),
@@ -468,4 +511,58 @@ describe('typed workDir/configFile options', () => {
       await killDetachedRun(pid);
     }
   }, 30_000);
+});
+
+describe('library selector API (AC-7, AC-12)', () => {
+  it('resolves a run created under a custom home via {home} without touching env', async () => {
+    const home = path.join(tmp, 'home');
+    const result = await withEnvAsync(
+      baseEnv({
+        PLAN_LOOP_WORK_DIR: undefined,
+        PLAN_LOOP_PLANS_DIR: undefined,
+        PLAN_LOOP_STATE_DIR: undefined,
+        FAKE_CODEX_OUTPUT: path.join(tmp, 'empty.json'),
+      }),
+      () =>
+        runPlanLoop({
+          input: path.join(tmp, 'input.md'),
+          iters: 1,
+          effort: 'low',
+          fix: false,
+          translate: false,
+          home,
+        }),
+    );
+    expect(result.exitCode).toBe(ExitCode.Ok);
+    expect(result.name).toBe('input');
+    const runId = result.runId ?? '';
+    const canonicalWork = realpathSync(path.join(home, 'runs', 'loop-input'));
+
+    // Lookups resolve purely via {home}; env carries no state/plans dir here.
+    expect(getRun('input', { home })?.runId).toBe(runId);
+    expect(getRun(runId, { home })?.name).toBe('input');
+    expect(getRunLogPath('input', { home })).toBe(path.join(canonicalWork, 'run.log'));
+    expect(listRuns({ home }).map((record) => record.name)).toContain('input');
+
+    const intervention = interveneRun('input', 'check the cutover', 'all', { home });
+    expect(intervention.exitCode).toBe(0);
+    expect(
+      readFileSync(path.join(canonicalWork, 'operator-interventions.jsonl'), 'utf8'),
+    ).toContain('check the cutover');
+
+    // A selector that matches nothing resolves to undefined / exit 2.
+    expect(getRun('ghost', { home })).toBeUndefined();
+    expect(interveneRun('ghost', 'x', 'all', { home }).exitCode).toBe(2);
+  });
+
+  it('getRunStatus(pid) keeps its signature and behavior', async () => {
+    const env = {
+      PLAN_LOOP_PLANS_DIR: path.join(tmp, 'plans'),
+      PLAN_LOOP_STATE_DIR: path.join(tmp, 'state'),
+      PLAN_LOOP_STATUS_SCAN_PS: '0',
+    };
+    const dead = await withEnvAsync(env, () => getRunStatus(999999));
+    expect(dead.exitCode).toBe(2);
+    expect(typeof dead.output).toBe('string');
+  });
 });

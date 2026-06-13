@@ -16,8 +16,8 @@ handoff, not a solver.
 - Upstream: ad-hoc debugging, review, audit, failed test investigation.
 - Upstream: `/requirements` when product or public-contract forks were resolved
   first.
-- Downstream: `/prompt-architect` -> confirmed `scripts/plan-agent-quorum.ts`
-  run -> implementation.
+- Downstream: `/prompt-architect` -> confirmed `plan:self` self-planning run ->
+  implementation.
 - Optional intermediate: `/requirements` when the fix raises product-level or
   public-contract forks that need operator decisions.
 
@@ -180,8 +180,7 @@ confirmation.
 - `/prompt-architect` emits run profiles that execute:
 
 ```text
-pnpm run build
-pnpm exec tsx scripts/plan-agent-quorum.ts --work <workdir> --effort <effort> --iters <n> --prompt <prompt-path>
+PLAN_LOOP_WORK_DIR=<workdir> pnpm run plan:self -- --effort <effort> --iters <n> --prompt <prompt-path>
 ```
 
 Run artifacts should use distinct workdirs under `.agents/plans/`. Do not start

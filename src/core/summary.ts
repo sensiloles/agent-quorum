@@ -55,6 +55,8 @@ function finalHealth(ctx: RunContext): CritiqueHealth | undefined {
 
 export interface RunReport {
   readonly workDir: string;
+  readonly runId?: string;
+  readonly name?: string;
   readonly iterations?: number;
   readonly finalPlanPath?: string;
   readonly summaryPath?: string;

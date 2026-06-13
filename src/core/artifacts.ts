@@ -39,10 +39,13 @@ export interface RunMetadata {
   creator: RunMetadataCreatorRole;
   fixer: RunMetadataSingleToolsRole;
   reviewer: RunMetadataSingleToolsRole;
+  runId: string;
+  name: string;
 }
 
-// Key set and order reproduce the reference run.meta.tsv exactly: four roles,
-// no translator fields.
+// The reference run.meta.tsv key sequence (four roles, no translator) is kept
+// as an unchanged prefix; run_id and name are appended as trailing rows so
+// existing key-position consumers stay valid.
 export function renderRunMetadata(meta: RunMetadata): string {
   const rows: [string, string][] = [
     ['pid', String(meta.pid)],
@@ -84,6 +87,8 @@ export function renderRunMetadata(meta: RunMetadata): string {
     ['reviewer_reasoning', meta.reviewer.reasoning],
     ['reviewer_tools', meta.reviewer.tools],
     ['reviewer_disallowed_tools', meta.reviewer.disallowedTools],
+    ['run_id', meta.runId],
+    ['name', meta.name],
   ];
   return rows.map(([key, value]) => `${key}\t${value}\n`).join('');
 }

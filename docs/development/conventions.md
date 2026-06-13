@@ -298,7 +298,7 @@ Catch as `unknown` and narrow with `instanceof`. Catch narrowly at boundaries (a
 
 Committed code and docs must work for any developer machine and clone location.
 
-- Resolve user-local artifacts under `$HOME/.claude/plans` (overridable via `PLAN_LOOP_PLANS_DIR` / `PLAN_LOOP_WORK_DIR`); resolve packaged assets relative to `packageRoot()`.
+- Resolve user-local artifacts under `$HOME/.agent-quorum` — functional output in `runs/`, the durable run ledger in `state/` (overridable via `PLAN_LOOP_HOME`, or the legacy `PLAN_LOOP_PLANS_DIR` / `PLAN_LOOP_STATE_DIR` / `PLAN_LOOP_WORK_DIR`); resolve packaged assets relative to `packageRoot()`.
 - In committed code and docs use `$HOME`, `~`, env vars, or package-relative paths — never an absolute clone path such as `/Users/<username>/...`.
 - `docs/` and journals may keep historical absolute paths as an audit trail; do not normalize them retroactively.
 

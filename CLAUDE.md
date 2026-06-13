@@ -45,9 +45,10 @@ Override all other project-level guidance.
   explain what it does, extract a named helper or boolean instead. Public API
   docblocks may explain invariants, units, failure modes, and external contracts;
   do not write parameter-by-parameter docblocks that repeat the type signature.
-- **Use the self-planning harness for dogfooding.** For changes that should be
-  designed by `agent-quorum` itself, run `scripts/plan-agent-quorum.ts` after
-  `pnpm run build`.
+- **Dogfood through the real CLI.** For changes that should be designed by
+  `agent-quorum` itself, drive the loop with `pnpm run plan:self -- --prompt …`
+  (the `plan-loop` bin from source, no build required); see
+  [`examples/`](examples/).
 - **No orphan background shells.** Do not leave long-running shell sessions or
   detached commands alive after moving on.
 
@@ -70,19 +71,19 @@ When facts conflict, trust in this order:
 
 ## 3. Required Entry Points
 
-| Task                  | Use                                                     |
-| --------------------- | ------------------------------------------------------- |
-| Install dependencies  | `pnpm install --frozen-lockfile`                        |
-| Build                 | `pnpm run build`                                        |
-| Typecheck             | `pnpm run typecheck`                                    |
-| Lint                  | `pnpm run lint`                                         |
-| Format check          | `pnpm run format-check`                                 |
-| Tests                 | `pnpm run test`                                         |
-| Full verification     | `pnpm run check`                                        |
-| Local CLI             | `pnpm run dev -- <args>`                                |
-| Public API smoke      | `pnpm run build` then import from `agent-quorum`        |
-| Self-planning dogfood | `pnpm exec tsx scripts/plan-agent-quorum.ts --prompt …` |
-| Repo-local binaries   | `pnpm exec <bin>`                                       |
+| Task                  | Use                                              |
+| --------------------- | ------------------------------------------------ |
+| Install dependencies  | `pnpm install --frozen-lockfile`                 |
+| Build                 | `pnpm run build`                                 |
+| Typecheck             | `pnpm run typecheck`                             |
+| Lint                  | `pnpm run lint`                                  |
+| Format check          | `pnpm run format-check`                          |
+| Tests                 | `pnpm run test`                                  |
+| Full verification     | `pnpm run check`                                 |
+| Local CLI             | `pnpm run dev -- <args>`                         |
+| Public API smoke      | `pnpm run build` then import from `agent-quorum` |
+| Self-planning dogfood | `pnpm run plan:self -- --prompt <prompt.md>`     |
+| Repo-local binaries   | `pnpm exec <bin>`                                |
 
 ## 4. Git Boundaries
 
@@ -110,11 +111,10 @@ When facts conflict, trust in this order:
 Use this when the repository should plan its own change before implementation:
 
 ```sh
-pnpm run build
-pnpm exec tsx scripts/plan-agent-quorum.ts --prompt path/to/task.md
+pnpm run plan:self -- --prompt path/to/task.md
 ```
 
-The harness imports the public package name `agent-quorum` and writes plan
+`plan:self` runs the `plan-loop` bin from source (no build) and writes plan
 artifacts under `.agents/plans/`. Requirements live under
 `.agents/requirements/`; prompts live under `.agents/prompts/`. Read the
 reported `summary.md` and `plan.final.md`, then implement and verify normally.
@@ -126,9 +126,8 @@ Canonical planning chains:
 - `/solution-handoff` -> `/prompt-architect` -> confirmed self-planning run.
 - `/prompt-architect` -> confirmed self-planning run.
 
-Only `/prompt-architect` asks for launch confirmation and starts
-`scripts/plan-agent-quorum.ts`; earlier steps prepare context and hand it
-downstream.
+Only `/prompt-architect` asks for launch confirmation and starts the
+`plan:self` run; earlier steps prepare context and hand it downstream.
 
 ## 7. Verification Floor
 

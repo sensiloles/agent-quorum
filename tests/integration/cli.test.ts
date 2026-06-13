@@ -2,6 +2,7 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
   realpathSync,
   rmSync,
@@ -363,6 +364,63 @@ describe('runner auth preflight', () => {
     );
     expect(result.status).toBe(0);
     expect(result.stderr).toContain('could not verify codex authentication');
+  });
+});
+
+describe('default artifact root (AC-14, AC-16)', () => {
+  it('writes functional + system artifacts under ~/.agent-quorum and leaves ~/.claude untouched', () => {
+    const home = path.join(tmp, 'home');
+    const claudePlans = path.join(home, '.claude', 'plans');
+    mkdirSync(claudePlans, { recursive: true });
+    const seed = path.join(claudePlans, 'seed.md');
+    const seedContent = '# legacy plan\n';
+    writeFileSync(seed, seedContent);
+
+    const result = runCli(
+      ['--effort', 'low', '--iters', '1', path.join(tmp, 'input.md'), '--no-fix', '--no-translate'],
+      {
+        PATH: `${fake}:${process.env.PATH ?? ''}`,
+        PLAN_LOOP_CONFIG_FILE: path.join(tmp, 'plan-loop.json'),
+        PLAN_LOOP_CLARIFY: '0',
+        PLAN_LOOP_RETRY_COUNT: '0',
+        FAKE_CODEX_PROMPT: path.join(tmp, 'codex.prompt'),
+        FAKE_CODEX_OUTPUT: path.join(tmp, 'empty.json'),
+        HOME: home,
+        PLAN_LOOP_HOME: undefined,
+        PLAN_LOOP_PLANS_DIR: undefined,
+        PLAN_LOOP_STATE_DIR: undefined,
+        PLAN_LOOP_WORK_DIR: undefined,
+      },
+    );
+    expect(result.status).toBe(0);
+
+    const runWork = path.join(home, '.agent-quorum', 'runs', 'loop-input');
+    expect(existsSync(path.join(runWork, 'plan.final.md'))).toBe(true);
+    expect(existsSync(path.join(runWork, 'run.meta.tsv'))).toBe(true);
+    expect(existsSync(path.join(home, '.agent-quorum', 'state'))).toBe(true);
+
+    expect(readFileSync(seed, 'utf8')).toBe(seedContent);
+    expect(readdirSync(claudePlans)).toEqual(['seed.md']);
+    expect(existsSync(path.join(claudePlans, '.runs'))).toBe(false);
+  });
+
+  it('still honors PLAN_LOOP_PLANS_DIR / PLAN_LOOP_STATE_DIR overrides', () => {
+    const result = runCli(
+      ['--effort', 'low', '--iters', '1', path.join(tmp, 'input.md'), '--no-fix', '--no-translate'],
+      {
+        PATH: `${fake}:${process.env.PATH ?? ''}`,
+        PLAN_LOOP_CONFIG_FILE: path.join(tmp, 'plan-loop.json'),
+        PLAN_LOOP_CLARIFY: '0',
+        PLAN_LOOP_RETRY_COUNT: '0',
+        FAKE_CODEX_PROMPT: path.join(tmp, 'codex.prompt'),
+        FAKE_CODEX_OUTPUT: path.join(tmp, 'empty.json'),
+        PLAN_LOOP_PLANS_DIR: path.join(tmp, 'plans'),
+        PLAN_LOOP_STATE_DIR: path.join(tmp, 'state'),
+        PLAN_LOOP_WORK_DIR: undefined,
+      },
+    );
+    expect(result.status).toBe(0);
+    expect(existsSync(path.join(tmp, 'plans', 'loop-input', 'plan.final.md'))).toBe(true);
   });
 });
 
