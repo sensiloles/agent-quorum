@@ -100,6 +100,16 @@ describe('validate_final_plan', () => {
     expect(runValidate(plan)).toBe(5);
   });
 
+  it('exits 5 on the tightened destructive-git patterns', () => {
+    const reset = path.join(tmp, 'reset.final.md');
+    writeFileSync(reset, '# Plan\n\n```bash\ngit reset --hard HEAD~1\n```\n');
+    expect(runValidate(reset)).toBe(5);
+
+    const checkout = path.join(tmp, 'checkout.final.md');
+    writeFileSync(checkout, '# Plan\n\n```bash\ngit checkout -- src/index.ts\n```\n');
+    expect(runValidate(checkout)).toBe(5);
+  });
+
   it('ignores prose-only references', () => {
     const plan = path.join(tmp, 'prose.final.md');
     writeFileSync(

@@ -1,6 +1,7 @@
 import path from 'node:path';
 import type { RoleMatrix, RolePermissions } from '../../src/core/config.js';
 import { effortMatrix } from '../../src/core/effort.js';
+import { DEFAULT_SPLIT_MIN_PHASES, type SplitMode } from '../../src/core/plan-package.js';
 import { skillPaths, type RunContext } from '../../src/core/run-context.js';
 import type { Scratch } from '../../src/runtime/scratch.js';
 import { REPO_ROOT } from './harness.js';
@@ -41,6 +42,9 @@ export interface TestContextOptions {
   locale?: string;
   matrix?: RoleMatrix;
   mode?: 'plan' | 'prompt';
+  splitMode?: SplitMode;
+  splitMinPhases?: number;
+  maxPlanLines?: number;
 }
 
 export function makeTestRunContext(
@@ -98,7 +102,11 @@ export function makeTestRunContext(
       fixPass: { timeoutSeconds: 0, semanticIdleTimeoutSeconds: 0, retryCount: 0 },
       translatePass: { timeoutSeconds: 0, semanticIdleTimeoutSeconds: 0, retryCount: 0 },
     },
-    maxPlanLines: 900,
+    maxPlanLines: options.maxPlanLines ?? 900,
+    split: {
+      mode: options.splitMode ?? 'auto',
+      minPhases: options.splitMinPhases ?? DEFAULT_SPLIT_MIN_PHASES,
+    },
     lastCritiqueIter: -1,
     resume: { startIter: 0, archivedCount: 0, archiveDir: '' },
   };

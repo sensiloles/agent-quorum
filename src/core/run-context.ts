@@ -4,6 +4,7 @@ import type { ProviderRuntime } from '../providers/runtime.js';
 import type { RolePermissions, RunSettings } from './config.js';
 import type { EffortMatrix } from './effort.js';
 import type { PassKnobs } from './knobs.js';
+import type { SplitPolicy } from './plan-package.js';
 import type { RunMode } from '../types.js';
 
 export interface SkillPaths {
@@ -60,6 +61,7 @@ export interface RunContext {
   provider: ProviderRuntime;
   passes: PassOverrides;
   maxPlanLines: number;
+  split: SplitPolicy;
   lastCritiqueIter: number;
   resume: ResumeState;
 }

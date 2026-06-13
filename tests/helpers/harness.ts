@@ -62,6 +62,92 @@ export function writeStructuredPlanFile(file: string, title: string): void {
   writeFileSync(file, body);
 }
 
+// A structurally complex plan: a `Phase | Touches | Depends on | Acceptance
+// gate` table plus matching `### P#` detail subsections, Files/Verification/STOP
+// sections, and non-goals/Open Questions — enough to exercise the table-branch
+// parser and the package emitter.
+export function writeLargeStructuredPlanFile(
+  file: string,
+  title: string,
+  phaseCount = 6,
+  startIndex = 1,
+): void {
+  const rows: string[] = [];
+  const details: string[] = [];
+  const verification: string[] = [];
+  const files: string[] = [];
+  for (let i = startIndex; i < startIndex + phaseCount; i += 1) {
+    const dep = i === startIndex ? 'requirements' : `P${i - 1}`;
+    rows.push(
+      `| P${i} Phase ${i} work | \`src/core/mod-${i}.ts\` | ${dep} | Phase ${i} gate observable |`,
+    );
+    details.push(
+      `### P${i} — Phase ${i} work`,
+      '',
+      `- Edit \`src/core/mod-${i}.ts\` to add the phase ${i} behavior.`,
+      `- Acceptance gate: phase ${i} gate observable.`,
+      '',
+    );
+    verification.push(`- P${i}: \`pnpm run test\` proves phase ${i} gate observable.`);
+    files.push(`- \`src/core/mod-${i}.ts\``);
+  }
+  const body = [
+    `# ${title}`,
+    '',
+    '## At a Glance',
+    `- Outcome: large fixture plan with ${phaseCount} phases.`,
+    '- Blast radius: fixture.',
+    `- Work Plan phases: ${phaseCount}.`,
+    '- Biggest risk: fixture risk.',
+    '',
+    '## Context',
+    '- Large fixture context.',
+    '',
+    '## Verified Facts',
+    '- Fixture fact at `package.json:1`.',
+    '',
+    '## Target State',
+    '- Fixture target.',
+    '',
+    '## Scope',
+    'In scope: fixture work.',
+    '',
+    'Non-goals:',
+    '',
+    '- Fixture out-of-scope item.',
+    '',
+    '## Work Plan',
+    '',
+    '| Phase | Touches | Depends on | Acceptance gate |',
+    '| --- | --- | --- | --- |',
+    ...rows,
+    '',
+    ...details,
+    '## Files and Interfaces',
+    '',
+    ...files,
+    '',
+    '## Verification',
+    '',
+    ...verification,
+    '',
+    '## STOP Triggers',
+    '- Halt on fixture contradiction.',
+    '',
+    '## Open Questions',
+    '- Fixture open question.',
+    '',
+    '## Impact Graph',
+    '',
+    '```mermaid',
+    'flowchart TD',
+    '  A["fixture input"] -->|"direct: fixture"| B["fixture plan"]',
+    '```',
+    '',
+  ].join('\n');
+  writeFileSync(file, body);
+}
+
 function writeJsonFixture(file: string, value: JsonValue): void {
   writeFileSync(file, `${JSON.stringify(value, null, 2)}\n`);
 }

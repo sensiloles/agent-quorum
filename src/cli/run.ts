@@ -12,8 +12,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { loadPlanLoopDotenv, packageRoot, projectRoot } from '../runtime/env.js';
 import { fileLineCount } from '../runtime/files.js';
-import { installSignalTeardown } from '../runtime/exec.js';
-import { ownPgid } from '../runtime/exec.js';
+import { installSignalTeardown, ownPgid } from '../runtime/exec.js';
 import { HaltError } from '../runtime/halt.js';
 import { err, log } from '../runtime/log.js';
 import { Scratch } from '../runtime/scratch.js';
@@ -39,13 +38,33 @@ import { markOperatorInterventionsMigrated } from '../core/interventions.js';
 import { resolveWatchdogKnobs } from '../core/knobs.js';
 import { runIterationLoop } from '../core/loop.js';
 import { preflightRunners } from '../core/preflight.js';
-import { planDocumentShapeHealth, planHasTitleHeading } from '../core/plan-shape.js';
+import {
+  DEFAULT_SPLIT_MIN_PHASES,
+  emitPlanPackage,
+  evaluateSplitDecision,
+  parsePlanStructure,
+  resolveSplitMode,
+  SPLIT_DECISION_FILE,
+  validatePlanPackage,
+  type PackageHealth,
+  type SplitDecision,
+} from '../core/plan-package.js';
+import {
+  planDocumentShapeHealth,
+  planHasTitleHeading,
+  type PlanShapeHealth,
+} from '../core/plan-shape.js';
 import { prepareResume } from '../core/resume.js';
 import { skillPaths, type RunContext } from '../core/run-context.js';
 import { buildRunReport, writeSummary, type RunReport } from '../core/summary.js';
 import { telegramNotifyCompletion, type TelegramCompletionNotification } from '../core/telegram.js';
 import { runTranslatePass } from '../core/translate-pass.js';
-import { readFindingsCounts, validateFinalPlan } from '../core/validate-plan.js';
+import {
+  EMPTY_FINDINGS_COUNTS,
+  readFindingsCounts,
+  validateFinalPlan,
+  type FindingsCounts,
+} from '../core/validate-plan.js';
 import { RUN_USAGE } from './help.js';
 import type { RunMode, RunOverrides } from '../types.js';
 
@@ -228,6 +247,153 @@ function errorReason(error: unknown): string {
   return String(error);
 }
 
+interface SplitPackageResult {
+  readonly splitDecision: SplitDecision;
+  readonly packagePhaseCount: number;
+  readonly packageDir?: string;
+  readonly packageHealth?: PackageHealth;
+}
+
+type FinalStatus = 'clean' | 'needs-review' | 'blocked';
+
+interface ResolveFinalStatusParams {
+  readonly finalTitle: 0 | 1;
+  readonly shape: PlanShapeHealth;
+  readonly findings: FindingsCounts;
+  readonly packageHealth?: PackageHealth;
+}
+
+interface FinalStatusResult {
+  readonly status: FinalStatus;
+  readonly reason: string;
+}
+
+function writeSplitDecisionFile(work: string, splitDecision: SplitDecision): void {
+  writeFileSync(
+    path.join(work, SPLIT_DECISION_FILE),
+    `${JSON.stringify(
+      {
+        decision: splitDecision.split ? 'split' : 'no-split',
+        rationale: splitDecision.rationale,
+        signals: splitDecision.signals,
+      },
+      null,
+      2,
+    )}\n`,
+  );
+}
+
+function emptyPackageHealth(): PackageHealth {
+  return {
+    ok: false,
+    emptyWorkPlan: true,
+    missingFiles: 0,
+    missingHeadings: 0,
+    brokenCrossRefs: 0,
+    forbiddenShell: 0,
+    references: EMPTY_FINDINGS_COUNTS,
+  };
+}
+
+function emitAndValidateSplitPackage(ctx: RunContext, finalPlan: string): SplitPackageResult {
+  const structure = parsePlanStructure(finalPlan);
+  const splitDecision = evaluateSplitDecision(structure, {
+    mode: ctx.split.mode,
+    minPhases: ctx.split.minPhases,
+    maxPlanLines: ctx.maxPlanLines,
+  });
+  writeSplitDecisionFile(ctx.work, splitDecision);
+
+  if (!splitDecision.split) {
+    log(`split: no package (${splitDecision.rationale})`);
+    return { splitDecision, packagePhaseCount: 0 };
+  }
+
+  const emitted = emitPlanPackage(ctx.work, finalPlan, structure, splitDecision);
+  if (emitted.kind === 'empty-work-plan') {
+    err('split: forced split over an empty/absent Work Plan — no package written');
+    return {
+      splitDecision,
+      packagePhaseCount: 0,
+      packageHealth: emptyPackageHealth(),
+    };
+  }
+
+  const packagePhaseCount = emitted.paths.phases.length;
+  const packageHealth = validatePlanPackage(ctx.provider.projectRoot, emitted.paths.dir);
+  log(`split: emitted plan.package/ with ${packagePhaseCount} phase doc(s)`);
+  return {
+    splitDecision,
+    packagePhaseCount,
+    packageDir: emitted.paths.dir,
+    packageHealth,
+  };
+}
+
+function isPackageBroken(packageHealth: PackageHealth): boolean {
+  return (
+    packageHealth.emptyWorkPlan ||
+    packageHealth.missingFiles > 0 ||
+    packageHealth.missingHeadings > 0 ||
+    packageHealth.brokenCrossRefs > 0 ||
+    packageHealth.forbiddenShell > 0
+  );
+}
+
+function hasPackageReferencesNeedingReview(packageHealth: PackageHealth): boolean {
+  return (
+    packageHealth.references.stale > 0 ||
+    packageHealth.references.ambiguous > 0 ||
+    packageHealth.references.unresolved > 0
+  );
+}
+
+function resolveFinalStatus({
+  finalTitle,
+  shape,
+  findings,
+  packageHealth,
+}: ResolveFinalStatusParams): FinalStatusResult {
+  if (finalTitle !== 1 || shape.missing !== 0 || shape.graph !== 1) {
+    return {
+      status: 'blocked',
+      reason: `plan shape broken (title=${finalTitle} missing_sections=${shape.missing} impact_graph_mermaid=${shape.graph})`,
+    };
+  }
+
+  if (packageHealth !== undefined && isPackageBroken(packageHealth)) {
+    return {
+      status: 'blocked',
+      reason: packageHealth.emptyWorkPlan
+        ? 'plan.package not emitted: forced split over an empty/absent Work Plan'
+        : `plan.package broken (missing_files=${packageHealth.missingFiles} missing_headings=${packageHealth.missingHeadings} broken_cross_refs=${packageHealth.brokenCrossRefs} forbidden_shell=${packageHealth.forbiddenShell})`,
+    };
+  }
+
+  if (findings.stale > 0) {
+    return {
+      status: 'needs-review',
+      reason: `${findings.stale} stale line reference(s) remain after fix-pass`,
+    };
+  }
+
+  if (findings.ambiguous > 0 || findings.unresolved > 0) {
+    return {
+      status: 'needs-review',
+      reason: `${findings.ambiguous} ambiguous + ${findings.unresolved} unresolved reference(s) (may be generic names or future files)`,
+    };
+  }
+
+  if (packageHealth !== undefined && hasPackageReferencesNeedingReview(packageHealth)) {
+    return {
+      status: 'needs-review',
+      reason: `plan.package references need review (stale=${packageHealth.references.stale} ambiguous=${packageHealth.references.ambiguous} unresolved=${packageHealth.references.unresolved})`,
+    };
+  }
+
+  return { status: 'clean', reason: '' };
+}
+
 export async function runPlanLoopCli(
   args: readonly string[],
   overrides: RunOverrides = {},
@@ -371,6 +537,10 @@ export async function runPlanLoopCli(
       },
       passes: { fixPass: knobs.fixPass, translatePass: knobs.translatePass },
       maxPlanLines: Number(process.env.PLAN_LOOP_MAX_PLAN_LINES ?? 900),
+      split: {
+        mode: resolveSplitMode(process.env.PLAN_LOOP_SPLIT),
+        minPhases: Number(process.env.PLAN_LOOP_SPLIT_MIN_PHASES ?? DEFAULT_SPLIT_MIN_PHASES),
+      },
       lastCritiqueIter: -1,
       resume: { startIter: 0, archivedCount: 0, archiveDir: '' },
     };
@@ -436,21 +606,20 @@ export async function runPlanLoopCli(
         log('fix-pass: disabled via --no-fix');
       }
 
+      const splitPackage = emitAndValidateSplitPackage(ctx, finalPlan);
+
       const shape = planDocumentShapeHealth(finalPlan);
       const finalTitle = planHasTitleHeading(finalPlan) ? 1 : 0;
       const findings = readFindingsCounts(path.join(work, 'findings.json'));
-      let finalStatus = 'clean';
-      let finalReason = '';
-      if (finalTitle !== 1 || shape.missing !== 0 || shape.graph !== 1) {
-        finalStatus = 'blocked';
-        finalReason = `plan shape broken (title=${finalTitle} missing_sections=${shape.missing} impact_graph_mermaid=${shape.graph})`;
-      } else if (findings.stale > 0) {
-        finalStatus = 'needs-review';
-        finalReason = `${findings.stale} stale line reference(s) remain after fix-pass`;
-      } else if (findings.ambiguous > 0 || findings.unresolved > 0) {
-        finalStatus = 'needs-review';
-        finalReason = `${findings.ambiguous} ambiguous + ${findings.unresolved} unresolved reference(s) (may be generic names or future files)`;
-      }
+      const packageHealth = splitPackage.packageHealth;
+      const final = resolveFinalStatus({
+        finalTitle,
+        shape,
+        findings,
+        ...(packageHealth !== undefined ? { packageHealth } : {}),
+      });
+      const finalStatus = final.status;
+      const finalReason = final.reason;
       if (finalStatus === 'clean') {
         log('FINAL: clean — plan.final.md is structurally complete with no stale references');
       } else {
@@ -472,6 +641,11 @@ export async function runPlanLoopCli(
         finalUnresolved: findings.unresolved,
         finalStatus,
         finalReason,
+        splitDecision: splitPackage.splitDecision.split ? 'split' : 'no-split',
+        splitRationale: splitPackage.splitDecision.rationale,
+        packagePhaseCount: splitPackage.packagePhaseCount,
+        ...(splitPackage.packageDir !== undefined ? { packageDir: splitPackage.packageDir } : {}),
+        ...(packageHealth !== undefined ? { packageHealth } : {}),
       });
 
       log(`done. summary: ${path.join(work, 'summary.md')}`);
@@ -484,9 +658,6 @@ export async function runPlanLoopCli(
         iterations: iter,
         ...(report.summaryPath !== undefined ? { summaryPath: report.summaryPath } : {}),
       });
-      if (finalStatus === 'blocked') {
-        return { exitCode, report };
-      }
       return { exitCode, report };
     } finally {
       cleanup();

@@ -70,7 +70,32 @@ default. The CLI contract stays env-first ([details](api.md)).
 
 `PLAN_LOOP_MAX_ITERS`, `PLAN_LOOP_DIFF_THRESHOLD`, `PLAN_LOOP_RETRY_COUNT`,
 `PLAN_LOOP_RETRY_DELAY_SECONDS`, `PLAN_LOOP_LOCALE`, `PLAN_LOOP_TRANSLATE`,
-`PLAN_LOOP_MAX_PLAN_LINES` (plan-size warning threshold, default 900).
+`PLAN_LOOP_MAX_PLAN_LINES` (plan-size warning threshold and split size signal,
+default 900).
+
+### Large-plan split policy (env layer)
+
+`PLAN_LOOP_SPLIT` (`auto` | `always` | `never`, default `auto`) and
+`PLAN_LOOP_SPLIT_MIN_PHASES` (default 5) decide whether a converged, post-fix
+`plan.final.md` is additionally emitted as a navigable `plan.package/` (index,
+master plan, self-contained phase docs, journal, runbook, debt ledger):
+
+- `auto` splits when the plan exceeds `PLAN_LOOP_MAX_PLAN_LINES` **or** has at
+  least `PLAN_LOOP_SPLIT_MIN_PHASES` Work Plan phases.
+- `always` forces a package regardless of size.
+- `never` keeps a single document and records an explicit no-split rationale in
+  `plan.split.json`, even above the size signal.
+
+These are env-only (no `plan-loop.json` settings layer), mirroring
+`PLAN_LOOP_MAX_PLAN_LINES`. Every run records the decision, rationale, and
+signals in `plan.split.json`; `plan.final.md` stays the entry point and the
+package (when present) shares one combined final status with it. An optional
+advisory `effort.md` may accompany a package; it never affects validation.
+
+The shared forbidden-shell scan that gates `plan.final.md` and every
+`plan.package/*.md` shell block rejects `pnpm -r`, `pnpm --filter`, `npx `,
+`git commit`, `git push`, `git pull`, and the destructive `git reset --hard` and
+`git checkout --` (aligned with the repo no-destructive-git rule).
 
 ### Role matrix overrides
 

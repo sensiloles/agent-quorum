@@ -78,11 +78,11 @@ export function extractPlanCodeSpans(planFile: string): string[] {
 }
 
 interface Finding {
-  category: 'stale_line' | 'ambiguous' | 'unresolved';
-  file: string;
-  line: number;
-  candidates?: string[];
-  actual_lines?: number;
+  readonly category: 'stale_line' | 'ambiguous' | 'unresolved';
+  readonly file: string;
+  readonly line: number;
+  readonly candidates?: readonly string[];
+  readonly actual_lines?: number;
 }
 
 export interface ReferenceCounters {
@@ -118,8 +118,8 @@ function lineCountOf(file: string): number | undefined {
 }
 
 interface ResolvePlanReferencesResult {
-  counters: ReferenceCounters;
-  findings: Finding[];
+  readonly counters: ReferenceCounters;
+  readonly findings: readonly Finding[];
 }
 
 function resolvePlanReferences(
@@ -252,19 +252,26 @@ function reportReferenceFindings(counters: ReferenceCounters): void {
   }
 }
 
-const FORBIDDEN_SHELL_STRINGS = [
+// Shared by the final-plan scan and the package validator so both surfaces
+// reject the same destructive commands. `git reset --hard` and `git checkout --`
+// mirror the reference change-pack validator and the repo no-destructive-git rule.
+export const FORBIDDEN_SHELL_STRINGS = [
   'pnpm -r',
   'pnpm --filter',
   'npx ',
   'git commit',
   'git push',
   'git pull',
+  'git reset --hard',
+  'git checkout --',
 ];
 
-function scanRuleViolations(planFile: string): number {
+// The text of every fenced sh/bash/zsh/shell block in a markdown document,
+// joined by newlines. Prose and non-shell fences never reach the forbidden scan.
+export function extractShellBlockText(content: string): string {
   const blocks: string[] = [];
   let inBlock = false;
-  for (const line of readFileSync(planFile, 'utf8').split('\n')) {
+  for (const line of content.split('\n')) {
     if (/^```(sh|bash|zsh|shell)[ \t\v\f\r]*$/.test(line)) {
       inBlock = true;
       continue;
@@ -277,7 +284,11 @@ function scanRuleViolations(planFile: string): number {
       blocks.push(line);
     }
   }
-  const codeBlocks = blocks.join('\n');
+  return blocks.join('\n');
+}
+
+function scanRuleViolations(planFile: string): number {
+  const codeBlocks = extractShellBlockText(readFileSync(planFile, 'utf8'));
 
   let violations = 0;
   for (const forbidden of FORBIDDEN_SHELL_STRINGS) {
@@ -308,14 +319,47 @@ export function validateFinalPlan(projectRoot: string, finalPlan: string): void 
 }
 
 export interface FindingsCounts {
-  stale: number;
-  ambiguous: number;
-  unresolved: number;
+  readonly stale: number;
+  readonly ambiguous: number;
+  readonly unresolved: number;
+}
+
+export const EMPTY_FINDINGS_COUNTS: FindingsCounts = {
+  stale: 0,
+  ambiguous: 0,
+  unresolved: 0,
+};
+
+// Mine `file:line` references across a set of package documents and write the
+// aggregated findings to `findingsFile` (kept separate from the final-plan
+// `findings.json` so neither overwrites the other). Unlike `validateFinalPlan`
+// this never throws on shell-rule violations — the package validator counts
+// those separately via `FORBIDDEN_SHELL_STRINGS`.
+export function validatePackageReferences(
+  projectRoot: string,
+  files: readonly string[],
+  findingsFile: string,
+): FindingsCounts {
+  const workspaceFiles = snapshotWorkspaceFiles(projectRoot);
+  const all: Finding[] = [];
+  for (const file of files) {
+    if (!existsSync(file)) {
+      continue;
+    }
+    const { findings } = resolvePlanReferences(projectRoot, file, workspaceFiles);
+    all.push(...findings);
+  }
+  aggregateFindings(all, findingsFile);
+  return {
+    stale: all.filter((finding) => finding.category === 'stale_line').length,
+    ambiguous: all.filter((finding) => finding.category === 'ambiguous').length,
+    unresolved: all.filter((finding) => finding.category === 'unresolved').length,
+  };
 }
 
 export function readFindingsCounts(findingsFile: string): FindingsCounts {
   if (!existsSync(findingsFile)) {
-    return { stale: 0, ambiguous: 0, unresolved: 0 };
+    return EMPTY_FINDINGS_COUNTS;
   }
   try {
     const parsed = JSON.parse(readFileSync(findingsFile, 'utf8')) as JsonValue;
@@ -328,6 +372,6 @@ export function readFindingsCounts(findingsFile: string): FindingsCounts {
       unresolved: lengthOf(obj.unresolved),
     };
   } catch {
-    return { stale: 0, ambiguous: 0, unresolved: 0 };
+    return EMPTY_FINDINGS_COUNTS;
   }
 }

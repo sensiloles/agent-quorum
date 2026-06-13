@@ -43,22 +43,40 @@ splits markdown and metadata, `max` additionally disables provider sessions.
 Post-convergence: the reference validator mines `file:line` tokens out of code
 spans, resolves them against an in-process workspace snapshot, and writes
 `findings.json`; the fix pass proposes → reviews → applies (every failure path
-keeps the converged plan); the final status computes clean / needs-review /
-blocked; when a locale is requested, the non-fatal translate pass renders
+keeps the converged plan). A deterministic split policy then evaluates the
+post-fix `plan.final.md` and records `plan.split.json` on every run; when the
+policy fires (size signal exceeded or a structural threshold met), the
+orchestrator emits a self-contained `plan.package/` derived from the post-fix
+plan and validates it into `package-findings.json`. The single final status
+folds plan shape, references, and package health together (clean /
+needs-review / blocked) and emits exactly one `FINAL:` log before the translate
+pass; when a locale is requested, the non-fatal translate pass renders
 `plan.final.<locale>.md`; `summary.md` closes the run.
+
+The package is a deterministic projection of the post-fix `plan.final.md`: its
+`plan.md` is a byte-for-byte copy and its phase docs are slices, so no role ever
+gains write tools (the orchestrator writes the package) and the split decision
+is reproducible for the same plan + config + workspace. See
+[plan-package contract](configuration.md) for the policy knobs.
 
 ## Artifact contract ($WORK)
 
 `plan.vN.md`, `critique.vN.json`, `update.vN.json`, `update-meta.vN.json`,
 `plan.revision.vN.md`, `*.raw` normalization sidecars, `plan.final.md`,
 `plan.final.before-fix.md`, `fix-proposal.md`, `fix-review.json`,
-`fix-applied.md`, optional `plan.final.<locale>.md`, `findings.json`, `summary.md`,
+`fix-applied.md`, optional `plan.final.<locale>.md`, `findings.json`,
+`plan.split.json` (split decision + rationale + signals, every run),
+`package-findings.json` (package `file:line` findings, only when split;
+never overwrites `findings.json`), the `plan.package/` directory (only when the
+split policy fires: `README.md`, `plan.md`, `run.md`, `journal.md`,
+`remaining-debt.md`, `phase-*.md`), `summary.md`,
 `rejected-log.jsonl`, `operator-interventions.jsonl`,
 `operator-intervention-migrations.jsonl`, `clarify-questions.json`,
 `clarify-answers.jsonl`, `clarify.offset`, `clarify.done`, `prompt.md`,
 `run.meta.tsv`, `run.log`, `creator.session-id`, and `stale.<timestamp>/`
-archives on resume. A registry copy of `run.meta.tsv` lives in
-`<state-dir>/<pid>.tsv` while the run is alive.
+archives on resume (which now also archive `plan.split.json`,
+`package-findings.json`, and `plan.package/`). A registry copy of
+`run.meta.tsv` lives in `<state-dir>/<pid>.tsv` while the run is alive.
 
 ## Watchdog and process hygiene
 

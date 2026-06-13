@@ -34,6 +34,15 @@ the non-fatal final localization pass and write `plan.final.<tag>.md`; `en`
 keeps the final plan English-only. Unknown flags print `unknown flag:` plus
 usage and exit 1. One positional input only.
 
+After the fix pass and before the single `FINAL:` status, a deterministic split
+policy (`PLAN_LOOP_SPLIT`, `PLAN_LOOP_SPLIT_MIN_PHASES`, sized by
+`PLAN_LOOP_MAX_PLAN_LINES` — see [configuration.md](configuration.md)) records
+`plan.split.json` and, when it fires, emits and validates a `plan.package/`.
+`summary.md` adds a `split_decision` line and, when a package is present,
+`package_dir`, `package_documents`, and `package_validation` lines. The final
+status folds plan shape, references, and package health into one `FINAL:` log;
+a broken package or an empty-Work-Plan forced split blocks the run (exit 6).
+
 Before the loop starts, every runner the effective config selects is
 preflighted: installation on `PATH`, then an authentication probe
 (`codex login status` / `claude auth status` / `<cursor-bin> status`) with a
@@ -59,7 +68,7 @@ Exit codes:
 | 3    | schema-invalid critique / update / update metadata   |
 | 4    | empty or shape-broken creator output; resume failure |
 | 5    | workspace-rule violation in the final plan           |
-| 6    | final plan blocked (broken document shape)           |
+| 6    | final plan or package blocked (broken shape/package) |
 | 7    | clarification gate cancelled or failed               |
 | 143  | TERM/INT teardown                                    |
 

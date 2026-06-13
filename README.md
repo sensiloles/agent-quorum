@@ -25,6 +25,7 @@ creator ──► plan.v0.md
                 ▼
 reference validator ──► fix pass ──► plan.final.md
                                            │
+                                           │  split policy (large/complex) ──► plan.package/
                                            │  locale pass (when requested)
                                            │
                                            ▼
@@ -35,6 +36,14 @@ Five roles — critic, creator, fixer, reviewer, translator — map onto three
 providers (`codex`, `claude`, `cursor-agent`) through a single declarative
 config. Every provider call runs in its own process group under a byte-idle /
 semantic-idle / wall-clock watchdog.
+
+`plan.final.md` is always the entry point. When a deterministic split policy
+fires — a plan over `PLAN_LOOP_MAX_PLAN_LINES` or with enough Work Plan phases —
+the orchestrator additionally emits a self-contained `plan.package/` (index,
+master plan, per-phase docs, journal, runbook, debt ledger) so a weaker model
+can execute one phase at a time; small plans stay a single file. The decision is
+recorded in `plan.split.json` every run. See
+[docs/configuration.md](docs/configuration.md) for the `PLAN_LOOP_SPLIT` knobs.
 
 ## Install
 

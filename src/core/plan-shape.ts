@@ -35,7 +35,7 @@ export function planHasHeading(file: string, heading: string): boolean {
   return fileLines(file).some((line) => pattern.test(line));
 }
 
-function planHasImpactGraphMermaid(file: string): boolean {
+export function planHasImpactGraphMermaid(file: string): boolean {
   const headingPattern = new RegExp(`^##${SPACE}+Impact Graph(${SPACE}|$|[-(:])`);
   const anyHeading = new RegExp(`^##${SPACE}+`);
   let inSection = false;

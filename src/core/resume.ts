@@ -100,6 +100,9 @@ export function archiveResumeStale(work: string, state: ResumeState, start: numb
     'fix-review.json',
     'fix-applied.md',
     'plan.final.before-fix.md',
+    'plan.split.json',
+    'package-findings.json',
+    'plan.package',
   ]) {
     archiveResumeFile(work, state, path.join(work, extra));
   }

@@ -66,6 +66,8 @@ const result = await runPlanLoop({
 //   summaryPath: '/abs/path/loop-my-plan/summary.md',
 //   iterations: 2,
 //   health: { critic: 3, addressed: 2, new: 1, invalid: 0, validAddressedPct: 66 },
+//   splitDecision: 'no-split',          // 'split' | 'no-split', present every run
+//   packageDir: undefined,              // '/abs/path/loop-my-plan/plan.package' only when split
 // }
 ```
 
@@ -74,7 +76,12 @@ const result = await runPlanLoop({
 that renders `summary.md`: `health` carries exactly the numbers of the
 `final_health` line, `iterations`/`finalPlanPath`/`summaryPath` mirror their
 summary lines; path fields are present only when the file exists, and failure
-exits may carry `workDir` alone. Artifacts land in the resolved workdir; for
+exits may carry `workDir` alone. `splitDecision` (`'split'` | `'no-split'`)
+mirrors the `split_decision` summary line and is present whenever
+`plan.split.json` was written; `packageDir` is present only when the split
+policy fired and a `plan.package/` was emitted. Both are additive —
+`finalPlanPath` is never replaced by a directory-only result, so existing
+callers are unaffected. Artifacts land in the resolved workdir; for
 both `workDir` and `configFile` the precedence is option > environment
 variable > default (`<plans>/loop-<base>` / the packaged `plan-loop.json`).
 `locale` is the typed counterpart of `--locale`; it defaults to `en`.

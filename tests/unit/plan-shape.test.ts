@@ -6,6 +6,7 @@ import {
   normalizePlanDocument,
   planDocumentShapeHealth,
   planFirstTitleLine,
+  planHasImpactGraphMermaid,
   planHasTitleHeading,
   requirePlanDocumentShape,
 } from '../../src/core/plan-shape.js';
@@ -55,6 +56,16 @@ describe('plan shape gates', () => {
     const target = file('shape.md');
     writeStructuredPlanFile(target, 'Shape');
     expect(planDocumentShapeHealth(target)).toEqual({ missing: 0, graph: 1 });
+  });
+
+  it('exported plan_has_impact_graph_mermaid detects the mermaid block', () => {
+    const ok = file('mermaid.md');
+    writeStructuredPlanFile(ok, 'Mermaid');
+    expect(planHasImpactGraphMermaid(ok)).toBe(true);
+
+    const missing = file('no-mermaid.md');
+    writeFileSync(missing, '# Plan\n\n## Impact Graph\n\nProse only, no fenced diagram.\n');
+    expect(planHasImpactGraphMermaid(missing)).toBe(false);
   });
 
   it('require_plan_document_shape rejects incomplete plans', () => {

@@ -23,10 +23,49 @@ Use $execute <plan-path>
 Use $execute for <plan-path>
 ```
 
-`<plan-path>` must resolve to one readable markdown plan file. Accept absolute
-paths, `~/...`, and paths relative to the repository root. If the argument names
-a plan run directory and exactly one implementation plan is obvious, use it;
-otherwise stop and ask for the exact file.
+`<plan-path>` resolves through one entry point to either a single readable
+markdown plan file or a `plan.package/` directory. Accept absolute paths,
+`~/...`, and paths relative to the repository root.
+
+- A single `.md` plan file keeps today's single-plan behavior described below.
+- A `plan.package/` directory (detected by `README.md` + `journal.md` +
+  at least one `phase-*.md`) is executed through the package-aware workflow in
+  the next section.
+- If the argument names a plan run directory and exactly one implementation
+  plan or one `plan.package/` is obvious, use it; otherwise stop and ask for the
+  exact path.
+
+## Package-Aware Execution
+
+When `<plan-path>` is a `plan.package/` directory, the package is the execution
+contract and `plan.package/run.md` is the protocol you follow. This is one
+entry point, not a second skill: the bootstrap below replaces "read the plan
+end to end" for packages, while single-file plans are unchanged.
+
+1. **Bootstrap in order** (do not read the master `plan.md` end to end): read
+   `README.md` (map, route, split rationale), then `journal.md` (progress table,
+   current/next phase, stop log), then `run.md` (the protocol), then the current
+   `phase-*.md` selected from the first pending journal progress row. Read a
+   bounded section of `plan.md` only when a phase doc references it by name.
+2. **Emit a positioning report before any edit.** State, as the package
+   `run.md` Step 0 requires: the last completed unit; the selected next unit;
+   the phase document path; the preflight / blocking-prerequisite state; whether
+   an operator override was applied (and, if so, what automatic positioning
+   would have selected and why the override wins); and the immediate intent.
+3. **Honor an operator override** of the next unit over the journal-derived
+   selection, but record the divergence in the positioning report and
+   `journal.md`.
+4. **Stop at phase boundaries for operator approval.** Execute exactly one
+   pending phase pin, update `journal.md`, then stop unless the operator asked
+   to continue.
+5. **On contradiction** between journal state and workspace state — a missing or
+   materially different file, route, schema, or interface; a repeated failure;
+   cycling edits — stop and write the stop report from `plan.package/run.md`
+   "Stop Report Format" into `journal.md`, then ask the operator.
+
+The package execution journal is `plan.package/journal.md` (the in-package
+progress record), not the repository `.agents/execution-journals/` journal used
+for single-file plans.
 
 ## Journal Location
 

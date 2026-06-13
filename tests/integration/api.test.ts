@@ -139,6 +139,24 @@ describe('runPlanLoop (in-process)', () => {
     });
   });
 
+  it('exposes additive package fields: no-split keeps finalPlanPath and reports no package', async () => {
+    const result = await withEnvAsync(
+      baseEnv({ FAKE_CODEX_OUTPUT: path.join(tmp, 'empty.json') }),
+      () =>
+        runPlanLoop({
+          input: path.join(tmp, 'input.md'),
+          iters: 1,
+          effort: 'low',
+          fix: false,
+          translate: false,
+        }),
+    );
+    expect(result.exitCode).toBe(ExitCode.Ok);
+    expect(result.finalPlanPath).toBe(path.join(realpathSync(work), 'plan.final.md'));
+    expect(result.splitDecision).toBe('no-split');
+    expect(result.packageDir).toBeUndefined();
+  });
+
   it('runs the fix pass and the localized final pass when locale is set', async () => {
     const input = path.join(tmp, 'bad-input.md');
     writeStructuredPlanFile(input, 'API Known Bad');

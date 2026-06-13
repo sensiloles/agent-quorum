@@ -1,8 +1,10 @@
 import { existsSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
+import { countNewlines } from '../runtime/files.js';
 import { isJsonObject, type JsonObject, type JsonValue } from './json.js';
 import { critiqueHealth, type CritiqueHealth } from './metrics.js';
 import { operatorInterventionsState } from './interventions.js';
+import { PACKAGE_DIR_NAME, SPLIT_DECISION_FILE, type PackageHealth } from './plan-package.js';
 import { planDocumentShapeHealth } from './plan-shape.js';
 import type { RunContext } from './run-context.js';
 
@@ -26,24 +28,19 @@ function updateIssueCount(file: string, predicate: (issue: JsonObject) => boolea
   }
 }
 
-function lineCount(content: string): number {
-  let count = 0;
-  for (const ch of content) {
-    if (ch === '\n') {
-      count += 1;
-    }
-  }
-  return count;
-}
-
 export interface SummaryInput {
-  iter: number;
-  localizedFinalFile: string;
-  finalStale: number;
-  finalAmbiguous: number;
-  finalUnresolved: number;
-  finalStatus: string;
-  finalReason: string;
+  readonly iter: number;
+  readonly localizedFinalFile: string;
+  readonly finalStale: number;
+  readonly finalAmbiguous: number;
+  readonly finalUnresolved: number;
+  readonly finalStatus: string;
+  readonly finalReason: string;
+  readonly splitDecision: string;
+  readonly splitRationale: string;
+  readonly packagePhaseCount: number;
+  readonly packageDir?: string;
+  readonly packageHealth?: PackageHealth;
 }
 
 // Shared by writeSummary and buildRunReport so the structured result can
@@ -57,16 +54,34 @@ function finalHealth(ctx: RunContext): CritiqueHealth | undefined {
 }
 
 export interface RunReport {
-  workDir: string;
-  iterations?: number;
-  finalPlanPath?: string;
-  summaryPath?: string;
-  health?: CritiqueHealth;
+  readonly workDir: string;
+  readonly iterations?: number;
+  readonly finalPlanPath?: string;
+  readonly summaryPath?: string;
+  readonly health?: CritiqueHealth;
+  readonly splitDecision?: string;
+  readonly packageDir?: string;
+}
+
+function readSplitDecision(work: string): string | undefined {
+  const file = path.join(work, SPLIT_DECISION_FILE);
+  if (!existsSync(file)) {
+    return undefined;
+  }
+  try {
+    const parsed = JSON.parse(readFileSync(file, 'utf8')) as JsonValue;
+    const decision = isJsonObject(parsed) ? parsed.decision : undefined;
+    return typeof decision === 'string' ? decision : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 export function buildRunReport(ctx: RunContext, iter: number): RunReport {
   const finalPlan = path.join(ctx.work, 'plan.final.md');
   const summaryFile = path.join(ctx.work, 'summary.md');
+  const packageDir = path.join(ctx.work, PACKAGE_DIR_NAME);
+  const splitDecision = readSplitDecision(ctx.work);
   const health = finalHealth(ctx);
   return {
     workDir: ctx.work,
@@ -74,6 +89,8 @@ export function buildRunReport(ctx: RunContext, iter: number): RunReport {
     ...(existsSync(finalPlan) ? { finalPlanPath: finalPlan } : {}),
     ...(existsSync(summaryFile) ? { summaryPath: summaryFile } : {}),
     ...(health !== undefined ? { health } : {}),
+    ...(splitDecision !== undefined ? { splitDecision } : {}),
+    ...(existsSync(packageDir) ? { packageDir } : {}),
   };
 }
 
@@ -119,6 +136,19 @@ export function writeSummary(ctx: RunContext, input: SummaryInput): void {
   lines.push(
     `- final_references: stale=${input.finalStale}, ambiguous=${input.finalAmbiguous}, unresolved=${input.finalUnresolved}`,
   );
+  lines.push(`- split_decision: ${input.splitDecision} — ${input.splitRationale}`);
+  if (input.packageDir !== undefined) {
+    lines.push(`- package_dir: \`${input.packageDir}\``);
+    lines.push(
+      `- package_documents: index/plan/run/journal/remaining-debt, phases=${input.packagePhaseCount}`,
+    );
+    if (input.packageHealth !== undefined) {
+      const pkgHealth = input.packageHealth;
+      lines.push(
+        `- package_validation: ${pkgHealth.ok ? 'ok' : 'broken'} (missing_files=${pkgHealth.missingFiles}, missing_headings=${pkgHealth.missingHeadings}, broken_cross_refs=${pkgHealth.brokenCrossRefs}, forbidden_shell=${pkgHealth.forbiddenShell}, references=${pkgHealth.references.stale}/${pkgHealth.references.ambiguous}/${pkgHealth.references.unresolved})`,
+      );
+    }
+  }
   if (input.finalStatus === 'clean') {
     lines.push('- FINAL: clean');
   } else {
@@ -127,7 +157,9 @@ export function writeSummary(ctx: RunContext, input: SummaryInput): void {
   lines.push('');
   if (ctx.mode === 'prompt') {
     lines.push('## v0 (created from prompt)');
-    lines.push(`- lines: ${lineCount(readFileSync(path.join(ctx.work, 'plan.v0.md'), 'utf8'))}`);
+    lines.push(
+      `- lines: ${countNewlines(readFileSync(path.join(ctx.work, 'plan.v0.md'), 'utf8'))}`,
+    );
     lines.push('');
   }
   lines.push('## Per-iteration');
@@ -150,7 +182,7 @@ export function writeSummary(ctx: RunContext, input: SummaryInput): void {
   }
   lines.push('');
   const rejectedContent = existsSync(rejectedLog) ? readFileSync(rejectedLog, 'utf8') : '';
-  lines.push(`## Rejected pool (${lineCount(rejectedContent)} entries)`);
+  lines.push(`## Rejected pool (${countNewlines(rejectedContent)} entries)`);
   lines.push('```json');
 
   const head = `${lines.join('\n')}\n`;

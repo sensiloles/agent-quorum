@@ -64,6 +64,7 @@ For each finding in `Findings`, find how the fixer handled it in `Proposed fix`.
 - Sections from the original plan were lost — `blocker`.
 - Step numbering changed — `major` (breaks external references to the plan).
 - Section headings changed — `minor` (same effect).
+- A Work Plan phase lost its split-ready self-containment (goal, prerequisites, touch surfaces, ordered steps, local verification, acceptance gate, common pitfalls, stop conditions), so the orchestrator can no longer slice it into a `plan.package/` phase doc — `major`.
 
 ## Severity
 

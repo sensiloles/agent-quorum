@@ -92,6 +92,28 @@ describe('stale artifact archive', () => {
     expect(archived).toContain('plan.final.md');
   });
 
+  it('archives package artifacts alongside plan.final.md', () => {
+    writeStructuredPlanFile(path.join(work, 'plan.v0.md'), 'V0');
+    writeFileSync(path.join(work, 'plan.final.md'), '# Final\n');
+    writeFileSync(path.join(work, 'plan.split.json'), '{"decision":"split"}\n');
+    writeFileSync(path.join(work, 'package-findings.json'), '{"stale_lines":[]}\n');
+    const pkg = path.join(work, 'plan.package');
+    mkdirSync(pkg, { recursive: true });
+    writeFileSync(path.join(pkg, 'README.md'), '# pack\n');
+
+    const state: ResumeState = { startIter: 0, archivedCount: 0, archiveDir: '' };
+    archiveResumeStale(work, state, 0);
+
+    expect(existsSync(path.join(work, 'plan.split.json'))).toBe(false);
+    expect(existsSync(path.join(work, 'package-findings.json'))).toBe(false);
+    expect(existsSync(pkg)).toBe(false);
+    const archived = readdirSync(state.archiveDir).sort();
+    expect(archived).toContain('plan.split.json');
+    expect(archived).toContain('package-findings.json');
+    expect(archived).toContain('plan.package');
+    expect(existsSync(path.join(state.archiveDir, 'plan.package', 'README.md'))).toBe(true);
+  });
+
   it('archives nothing on a clean resume', () => {
     writeStructuredPlanFile(path.join(work, 'plan.v0.md'), 'V0');
     const state: ResumeState = { startIter: 0, archivedCount: 0, archiveDir: '' };

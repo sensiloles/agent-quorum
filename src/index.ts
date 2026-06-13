@@ -42,6 +42,8 @@ export interface RunResult {
   summaryPath?: string;
   iterations?: number;
   health?: RunHealth;
+  splitDecision?: string;
+  packageDir?: string;
 }
 
 export interface CommandResult {
@@ -117,6 +119,8 @@ function toRunResult(outcome: RunOutcome): RunResult {
           },
         }
       : {}),
+    ...(report.splitDecision !== undefined ? { splitDecision: report.splitDecision } : {}),
+    ...(report.packageDir !== undefined ? { packageDir: report.packageDir } : {}),
   };
 }
 
