@@ -58,7 +58,7 @@ When facts conflict, trust in this order:
 1. This file, mirrored by the `AGENTS.md` symlink.
 2. [`docs/development/conventions.md`](docs/development/conventions.md) for
    code, git, verification, and style rules.
-3. `eslint.config.js`, `tsconfig.json`, and `vitest.config.ts` for enforced
+3. `eslint.config.ts`, `tsconfig.json`, and `vitest.config.ts` for enforced
    tooling behavior.
 4. `package.json` for scripts, package exports, bin entries, engines, and direct
    dependencies.

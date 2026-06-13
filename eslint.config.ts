@@ -19,9 +19,5 @@ export default defineConfig(
       '@typescript-eslint/restrict-template-expressions': ['error', { allowNumber: true }],
     },
   },
-  {
-    files: ['**/*.js'],
-    extends: [tseslint.configs.disableTypeChecked],
-  },
   prettier,
 );

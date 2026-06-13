@@ -7,7 +7,7 @@ This document is the single source of truth for agent-quorum development convent
 When facts conflict, use this order:
 
 1. This document for code, documentation, git, and verification conventions.
-2. `eslint.config.js` and `tsconfig.json` for machine-enforced rules — when this document and the linter disagree, the linter wins and this document is the bug.
+2. `eslint.config.ts` and `tsconfig.json` for machine-enforced rules — when this document and the linter disagree, the linter wins and this document is the bug.
 3. `package.json` for scripts, exports, bin, and direct dependencies.
 4. `docs/architecture.md` for roles, providers, the loop, and the artifact contract.
 
@@ -98,7 +98,7 @@ it.
 
 ## Linting and Editor Tooling
 
-- ESLint is flat-config only (`eslint.config.js`). Do not add `.eslintrc*` files.
+- ESLint is flat-config only (`eslint.config.ts`). Do not add `.eslintrc*` files.
 - The config layers `@eslint/js` recommended, `typescript-eslint` `strictTypeChecked` + `stylisticTypeChecked`, and `eslint-config-prettier` last. Prettier owns formatting; ESLint owns correctness and style-of-types.
 - `strictTypeChecked` bans `any` (`no-explicit-any`), unsafe assignments, and floating promises. `stylisticTypeChecked` enforces `@typescript-eslint/consistent-type-definitions` (`interface` for object shapes) among others. Do not disable these per-line to dodge a real finding — fix the code.
 - Type-aware linting uses `projectService`; new files must be inside the `tsconfig.json` `include` globs (`src`, `tests`) or lint will not type-check them.
