@@ -233,6 +233,29 @@ AGENT_QUORUM_WORK_DIR=.agents/plans/loop-<slug>-high pnpm run plan:self -- --eff
 artifacts and the ledger under `.agents/plans/`. For the public API path that
 external consumers use, see [`examples/api.ts`](../../examples/api.ts).
 
+## Smoke testing
+
+Use the smoke harness to confirm the `plan` stage still runs end to end after a
+change, cheaply and without a real planning task. There is one smoke per
+provider — each runs the whole loop on that provider's cheap model over the
+committed [`scripts/smoke.plan.md`](../../scripts/smoke.plan.md) prompt and
+writes to `.agents/plans/smoke-<provider>/`.
+
+```sh
+pnpm run smoke:codex     # all roles on codex gpt-5.5
+pnpm run smoke:claude    # all roles on claude haiku
+pnpm run smoke:cursor    # all roles on cursor composer-2.5
+```
+
+Each is a single low-effort iteration with no fix or translate pass. A pass ends
+with `FINAL: clean` or `FINAL: needs-review` and exit 0, leaving `plan.final.md`
+and `summary.md` in the workdir. Override the model, reasoning, or input:
+
+```sh
+SMOKE_MODEL=sonnet SMOKE_REASONING=high pnpm run smoke:claude
+SMOKE_PROMPT=.agents/prompts/<slug>.md pnpm run smoke:codex
+```
+
 ## Verification
 
 For skill or workflow documentation changes:

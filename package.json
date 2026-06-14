@@ -45,6 +45,9 @@
   "scripts": {
     "dev": "AGENT_QUORUM_PLANS_DIR=.agents/plans tsx src/cli/main.ts",
     "plan:self": "AGENT_QUORUM_PLANS_DIR=.agents/plans tsx src/cli/main.ts plan",
+    "smoke:codex": "scripts/smoke.sh codex",
+    "smoke:claude": "scripts/smoke.sh claude",
+    "smoke:cursor": "scripts/smoke.sh cursor",
     "clean": "rm -rf dist",
     "build": "pnpm run clean && tsc -p tsconfig.build.json",
     "typecheck": "tsc --noEmit",
