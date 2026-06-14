@@ -1,0 +1,114 @@
+name: update project status
+
+on:
+  workflow_call:
+    inputs:
+      done_option_id:
+        required: true
+        type: string
+      issue_number:
+        required: true
+        type: string
+      project_id:
+        required: true
+        type: string
+      repository_name:
+        required: true
+        type: string
+      repository_owner:
+        required: true
+        type: string
+      status_field_id:
+        required: true
+        type: string
+    secrets:
+      PROJECTS_TOKEN:
+        required: true
+
+permissions:
+  contents: read
+  issues: read
+
+jobs:
+  update:
+    name: Update project status
+    runs-on: ubuntu-latest
+    environment: projects-automation
+    steps:
+      - name: Update project status
+        shell: bash
+        env:
+          DONE_OPTION_ID: ${{ inputs.done_option_id }}
+          GH_TOKEN: ${{ secrets.PROJECTS_TOKEN }}
+          ISSUE_NUMBER: ${{ inputs.issue_number }}
+          PROJECT_ID: ${{ inputs.project_id }}
+          REPOSITORY_NAME: ${{ inputs.repository_name }}
+          REPOSITORY_OWNER: ${{ inputs.repository_owner }}
+          STATUS_FIELD_ID: ${{ inputs.status_field_id }}
+        run: |
+          if [ -z "${GH_TOKEN:-}" ]; then
+            echo "PROJECTS_TOKEN secret is required to update GitHub Projects."
+            exit 1
+          fi
+
+          issue_data="$(
+            # shellcheck disable=SC2016
+            gh api graphql \
+              -f query='
+                query($owner: String!, $repo: String!, $issue: Int!) {
+                  repository(owner: $owner, name: $repo) {
+                    issue(number: $issue) {
+                      projectItems(first: 20) {
+                        nodes {
+                          id
+                          project {
+                            id
+                          }
+                        }
+                      }
+                    }
+                  }
+              }
+            ' \
+              -f owner="$REPOSITORY_OWNER" \
+              -f repo="$REPOSITORY_NAME" \
+              -F issue="$ISSUE_NUMBER"
+          )"
+
+          item_id="$(
+            printf '%s' "$issue_data" \
+              | jq -r --arg project "$PROJECT_ID" \
+                '.data.repository.issue.projectItems.nodes[] | select(.project.id == $project) | .id' \
+              | head -n 1
+          )"
+
+          if [ -z "$item_id" ]; then
+            echo "Issue #$ISSUE_NUMBER is not in the delivery project; nothing to update."
+            exit 0
+          fi
+
+          # shellcheck disable=SC2016
+          gh api graphql \
+            -f query='
+              mutation($project: ID!, $item: ID!, $field: ID!, $option: String!) {
+                updateProjectV2ItemFieldValue(
+                  input: {
+                    projectId: $project
+                    itemId: $item
+                    fieldId: $field
+                    value: { singleSelectOptionId: $option }
+                  }
+                ) {
+                  projectV2Item {
+                    id
+                  }
+                }
+              }
+            ' \
+            -f project="$PROJECT_ID" \
+            -f item="$item_id" \
+            -f field="$STATUS_FIELD_ID" \
+            -f option="$DONE_OPTION_ID" \
+            --silent
+
+          echo "Moved issue #$ISSUE_NUMBER to Done."

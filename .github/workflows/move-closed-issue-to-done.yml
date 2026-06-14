@@ -12,82 +12,13 @@ jobs:
   move:
     if: github.repository == 'eventbalancer/agent-quorum'
     name: Move closed issue to Done
-    runs-on: ubuntu-latest
-    env:
-      DONE_OPTION_ID: a4916c89
-      GH_TOKEN: ${{ secrets.PROJECTS_TOKEN }}
-      ISSUE_NUMBER: ${{ github.event.issue.number }}
-      PROJECT_ID: PVT_kwHOAVA9Gc4Baj8g
-      REPOSITORY_NAME: ${{ github.event.repository.name }}
-      REPOSITORY_OWNER: ${{ github.repository_owner }}
-      STATUS_FIELD_ID: PVTSSF_lAHOAVA9Gc4Baj8gzhVarVY
-    steps:
-      - name: Update project status
-        shell: bash
-        run: |
-          if [ -z "${GH_TOKEN:-}" ]; then
-            echo "PROJECTS_TOKEN secret is required to update GitHub Projects."
-            exit 1
-          fi
-
-          issue_data="$(
-            # shellcheck disable=SC2016
-            gh api graphql \
-              -f query='
-                query($owner: String!, $repo: String!, $issue: Int!) {
-                  repository(owner: $owner, name: $repo) {
-                    issue(number: $issue) {
-                      projectItems(first: 20) {
-                        nodes {
-                          id
-                          project {
-                            id
-                          }
-                        }
-                      }
-                    }
-                  }
-              }
-            ' \
-              -f owner="$REPOSITORY_OWNER" \
-              -f repo="$REPOSITORY_NAME" \
-              -F issue="$ISSUE_NUMBER"
-          )"
-
-          item_id="$(
-            printf '%s' "$issue_data" \
-              | jq -r --arg project "$PROJECT_ID" \
-                '.data.repository.issue.projectItems.nodes[] | select(.project.id == $project) | .id' \
-              | head -n 1
-          )"
-
-          if [ -z "$item_id" ]; then
-            echo "Issue #$ISSUE_NUMBER is not in the delivery project; nothing to update."
-            exit 0
-          fi
-
-          # shellcheck disable=SC2016
-          gh api graphql \
-            -f query='
-              mutation($project: ID!, $item: ID!, $field: ID!, $option: String!) {
-                updateProjectV2ItemFieldValue(
-                  input: {
-                    projectId: $project
-                    itemId: $item
-                    fieldId: $field
-                    value: { singleSelectOptionId: $option }
-                  }
-                ) {
-                  projectV2Item {
-                    id
-                  }
-                }
-              }
-            ' \
-            -f project="$PROJECT_ID" \
-            -f item="$item_id" \
-            -f field="$STATUS_FIELD_ID" \
-            -f option="$DONE_OPTION_ID" \
-            --silent
-
-          echo "Moved issue #$ISSUE_NUMBER to Done."
+    uses: ./.github/workflows/update-project-status.yml
+    with:
+      done_option_id: a4916c89
+      issue_number: ${{ github.event.issue.number }}
+      project_id: PVT_kwHOAVA9Gc4Baj8g
+      repository_name: ${{ github.event.repository.name }}
+      repository_owner: ${{ github.repository_owner }}
+      status_field_id: PVTSSF_lAHOAVA9Gc4Baj8gzhVarVY
+    secrets:
+      PROJECTS_TOKEN: ${{ secrets.PROJECTS_TOKEN }}
