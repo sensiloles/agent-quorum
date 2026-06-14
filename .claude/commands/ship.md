@@ -299,19 +299,54 @@ runbook conflict, follow the runbook and report the mismatch.
    the release tag while main CI is unknown or failing unless the operator
    explicitly accepts the risk.
 
-10. After main CI is green and the operator approves the tag step:
+10. Build the GitHub Release description from the commits that entered the
+    release. Determine the previous release tag before creating the new tag:
+
+    ```sh
+    git describe --tags --abbrev=0 --match 'v[0-9]*' HEAD^
+    git log --reverse --date=short --format='%h%x09%ad%x09%s%d%n%b' <previous-tag>..HEAD
+    git diff --stat <previous-tag>..HEAD
+    ```
+
+    If there is no previous release tag, use the full reachable history and
+    call it an initial release. Include every non-release commit from the range,
+    either as an individual bullet or in a grouped section, so no behavior,
+    documentation, test, skill, or packaging change disappears. Treat the
+    GitHub auto-generated notes as a cross-check only, not as the final text.
+
+    Draft release notes with this structure:
+
+    ```text
+    ## Summary
+    - <1-3 bullets describing the release outcome>
+
+    ## Changes
+    - <grouped, specific bullets based on the commit range>
+
+    ## Verification
+    - <local checks, CI state, npm publish state>
+
+    ## Package
+    npm: agent-quorum@X.Y.Z
+    ```
+
+    Mention the comparison range (`<previous-tag>..vX.Y.Z`) and any notable
+    issue or PR references found in commit bodies. Keep the text factual and
+    user-facing; do not paste raw commit logs as the description.
+
+11. After main CI is green and the operator approves the tag step:
 
     ```sh
     git tag -a vX.Y.Z -m "vX.Y.Z"
     git push origin vX.Y.Z
     ```
 
-11. Publishing is performed by GitHub Actions, not locally. After the tag push,
+12. Publishing is performed by GitHub Actions, not locally. After the tag push,
     tell the operator to open the tag-triggered `release` workflow, review the
     validation summary and dry-run package output, approve the protected
     `npm-publish` environment, and wait for `npm publish --access public`.
 
-12. Verify the published package and GitHub Release:
+13. Verify the published package and GitHub Release:
 
     ```sh
     npm view agent-quorum@X.Y.Z version
@@ -322,10 +357,16 @@ runbook conflict, follow the runbook and report the mismatch.
     git rev-parse origin/main
     ```
 
-    The GitHub Release is created after npm publishing succeeds. Include
-    `npm: agent-quorum@X.Y.Z` in the release notes.
+    The GitHub Release is created after npm publishing succeeds. Use the drafted
+    release description from the commit range, with `npm: agent-quorum@X.Y.Z` in
+    the `Package` section. If `gh` is available and the operator approves
+    creating the release from the CLI, use:
 
-13. Failure handling follows `docs/release.md`. Never move or delete a release
+    ```sh
+    gh release create vX.Y.Z --title "vX.Y.Z" --notes-file <notes-file>
+    ```
+
+14. Failure handling follows `docs/release.md`. Never move or delete a release
     tag after npm publish succeeds. Delete a bad unpublished tag only after the
     operator explicitly asks and confirms the package was not published.
 

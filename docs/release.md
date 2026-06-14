@@ -165,18 +165,46 @@ immutable; fix forward with a new version.
 
 ## GitHub Release
 
-Create the GitHub Release after npm publishing succeeds.
+Create the GitHub Release after npm publishing succeeds. Its description must
+be based on the commits that entered the release, not just the auto-generated
+GitHub notes.
+
+Before creating the tag, identify the previous release tag and inspect the
+release range:
+
+```bash
+git describe --tags --abbrev=0 --match 'v[0-9]*' HEAD^
+git log --reverse --date=short --format='%h%x09%ad%x09%s%d%n%b' <previous-tag>..HEAD
+git diff --stat <previous-tag>..HEAD
+```
+
+If there is no previous release tag, use the full reachable history and call it
+an initial release. Every non-release commit in the range should be represented
+either as a specific bullet or inside a grouped section, including
+documentation, tests, skills, and package-maintenance work when present.
 
 1. Open GitHub Releases → Draft a new release.
 2. Select the existing tag `vX.Y.Z`.
 3. Title the release `vX.Y.Z`.
-4. Generate release notes or write a concise summary of user-facing changes.
-5. Include the npm package reference:
+4. Write a structured description with:
 
    ```text
+   ## Summary
+   - <1-3 bullets describing the release outcome>
+
+   ## Changes
+   - <grouped, specific bullets based on the commit range>
+
+   ## Verification
+   - <local checks, CI state, npm publish state>
+
+   ## Package
    npm: agent-quorum@X.Y.Z
    ```
 
+5. Mention the comparison range (`<previous-tag>..vX.Y.Z`) and notable issue or
+   PR references found in commit bodies. Use generated notes only as a
+   cross-check.
 6. Publish the GitHub Release.
 
 Creating the GitHub Release after npm publish avoids advertising a release whose

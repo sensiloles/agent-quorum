@@ -204,7 +204,7 @@ Outputs:
 
 - a change-set flow that verifies, commits, and optionally pushes dirty changes;
 - a release flow following `docs/release.md` for version bump, tag, publish
-  approval, and GitHub Release.
+  approval, and a commit-range-based GitHub Release description.
 
 Rules:
 
